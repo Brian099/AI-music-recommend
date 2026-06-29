@@ -27,18 +27,20 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 - **歌单协同过滤**：通过 Track2Vec（Word2Vec 思路）学习 188 万份 Spotify 歌单中歌曲的共现关系
 - **毫秒级响应**：基于 Qdrant 向量数据库，4500 万首歌曲的检索响应在 30~100ms 内完成
 
+
 ## 开源路线
 
-> 如果觉得项目有帮助，请帮忙点个⭐️，这对个人项目来说很重要，谢谢！
+> 如果觉得项目有帮助，请帮忙点个⭐️。这对个人项目来说很重要，谢谢！
 
-- [x] 2026-06-26：开源 初版代码 + [EmbeatMLP 模型权重](checkpoints/EmbeatMLP/)
-- [x] 2026-06-26：开源 [45M 单曲数据集](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [技术文档](https://www.bilibili.com/opus/1218087093501165591)
-- [ ] 100 Star：开源 Qdrant 数据库
-- [ ] 1K Star：开源 Track2Vec 模型权重 + 1.8M 歌单数据集
+- [x] **2026-06-26**：开源 初版代码 + [EmbeatMLP 模型权重](checkpoints/EmbeatMLP/)
+- [x] **2026-06-26**：开源 [45M 单曲数据集](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [技术文档](https://www.bilibili.com/opus/1218087093501165591)
+- [ ] **100 Star**：开源 Qdrant 数据库
+- [ ] **1K Star**：开源 Track2Vec 模型权重 + 1.8M 歌单数据集
+
 
 ## 效果展示
 
-以下是 Embeat 的推荐结果示例（种子曲目 -> 3首最佳推荐）：
+> 以下是 Embeat 的推荐结果示例（播放前请关闭静音）
 
 <details open>
 <summary><b>Uptown Funk - Bruno Mars [dance pop, pop]</b></summary>
@@ -72,7 +74,7 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 </table>
 </details>
 
-<details open>
+<details>
 <summary><b>杀死那个石家庄人 - 万能青年旅店 [chinese indie rock]</b></summary>
 <table>
 <tr>
@@ -104,7 +106,7 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 </table>
 </details>
 
-<details open>
+<details>
 <summary><b>Sis puella magica! - 梶浦由記 [anime score, japanese vgm]</b></summary>
 <table>
 <tr>
@@ -136,7 +138,7 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 </table>
 </details>
 
-<details open>
+<details>
 <summary><b>Gizeh - Oskar Schuster [compositional ambient]</b></summary>
 <table>
 <tr>
@@ -170,8 +172,6 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 
 ### LLM 盲评对比
 
-<b>具体对比细节请阅读 [技术文档](https://www.bilibili.com/opus/1218087093501165591)</b>
-
 使用 LLM-as-a-Judge 方法（GPT-5.5 / Gemini Flash 3.5 / Claude Sonnet 4.6），对 Embeat 与网易云音乐进行 AB 盲测：
 
 | 评估模型 | Embeat胜 | 网易云胜 | 平局 |
@@ -180,7 +180,33 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 | Gemini Flash 3.5 | **9** | 1 | 0 |
 | GPT 5.5 | **6** | 4 | 0 |
 
+**结论：**
+
+- Embeat 的核心优势在于风格精准度和艺人多样性的平衡，尤其在跨语言、跨文化的小众风格场景中优势突出
+- 网易云音乐仅在华语本土内容的深度挖掘上仍有一定参考价值
+- 具体对比细节请阅读 [技术文档](https://www.bilibili.com/opus/1218087093501165591)
+
+
 ## 系统架构
+
+### 模型说明
+
+**EmbeatMLP** - 声学特征编码模型
+
+- 输入：64 维离散特征（key, mode, tempo, time_signature）+ 64 维连续特征（energy, valence, danceability 等 7 维）
+- 架构：双塔 MLP（Discrete Tower + Acoustic Tower -> Backbone）
+- 输出：64 维 L2 归一化向量
+- 训练：Masked InfoNCE Loss，batch_size=4096，~70 steps 即可收敛
+- 参数量极小，支持纯 CPU 实时推理
+
+**Track2Vec** - 歌单协同过滤模型
+
+- 基于 Word2Vec Skip-Gram，将歌单视为"句子"，歌曲视为"单词"
+- 训练数据：188 万份 Spotify 歌单
+- 词表：109 万首歌曲，64 维向量
+- 支持纯 CPU 实时推理，单次查询耗时 < 200ms
+
+### 多路召回
 
 ```
 输入种子曲目: track_id / track_name + artist_name
@@ -196,26 +222,37 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
   └─ 输出: Top-K 推荐列表
 ```
 
-### 模型说明
+### 项目结构
 
-**EmbeatMLP** - 声学特征编码模型
+```
+Embeat/
+├── assets/                 # 资源文件目录
+├── checkpoints/            # 模型目录目录
+│   ├── EmbeatMLP/          # EmbeatMLP 模型权重
+│   └── Track2Vec/          # Track2Vec 模型权重 (需额外下载)
+├── data/                   # 数据处理目录 (未完全整理)
+├── infer/                  # 推理代码目录
+│   ├── Embeat.py           # Embeat 推荐系统核心
+│   ├── EmbeatUtils.py      # Embeat 扩展辅助工具
+│   ├── infer.py            # EmbeatMLP 模型推理
+│   ├── eval_infer.py       # EmbeatMLP 模型评估工具
+│   └── hf_to_qdrant.py     # HF Dataset 转 Qdrant 数据库
+├── train/                  # 训练代码目录
+│   ├── model.py            # EmbeatMLP 模型定义
+│   ├── dataset.py          # HF Dataset 数据集处理
+│   ├── sampler.py          # Masked InfoNCE 正负样本采样器
+│   ├── loss.py             # Masked InfoNCE Loss
+│   ├── trainer.py          # EmbeatMLP 训练器
+│   ├── train.py            # EmbeatMLP 训练入口
+│   └── train_track2vec.py  # Track2Vec 训练入口
+├── requirements.txt
+└── LICENSE
+```
 
-- 输入：离散特征（key, mode, tempo, time_signature）+ 连续特征（energy, valence, danceability 等 7 维）
-- 架构：双塔 MLP（Discrete Tower + Acoustic Tower -> Backbone）
-- 输出：64 维 L2 归一化向量
-- 训练：Masked InfoNCE Loss，batch_size=4096，~70 steps 即可收敛
-- 参数量极小，支持纯 CPU 实时推理
-
-**Track2Vec** - 歌单协同过滤模型
-
-- 基于 Word2Vec Skip-Gram，将歌单视为"句子"，歌曲视为"单词"
-- 训练数据：188 万份 Spotify 歌单
-- 词表：109 万首歌曲，64 维向量
-- 单次查询耗时 < 200ms
 
 ## 快速开始
 
-### 环境要求
+### 环境要求（推荐）
 
 - Python >= 3.10
 - PyTorch >= 2.6, < 2.7（训练需要）
@@ -272,7 +309,8 @@ song_b = {"key": 5, "mode": 0, "tempo": 87, "time_signature": 4,
 
 similarity = infer(sample_a=song_a, sample_b=song_b,
                    checkpoint_path="checkpoints/EmbeatMLP/model.pt")
-print(f"Similarity: {similarity:.4f}")
+
+print(f"Similarity: {similarity}")
 ```
 
 ### 推理：基于 Qdrant 的歌曲推荐
@@ -286,48 +324,25 @@ python Embeat.py -s "晴天 - Jay Chou"   # 通过歌名和歌手查询
 python Embeat.py -a "Jay Chou"   # 通过歌手名查询
 ```
 
-## 项目结构
-
-```
-Embeat/
-├── assets/                 # 资源文件
-├── checkpoints/
-│   ├── EmbeatMLP/          # EmbeatMLP 模型权重
-│   └── Track2Vec/          # Track2Vec 模型权重 (需额外下载)
-├── data/                   # 数据处理脚本（未完全整理）
-├── infer/                  # 推理代码
-│   ├── Embeat.py           # 推荐系统核心 (多路召回 + 重排)
-│   ├── infer.py            # EmbeatMLP 推理入口
-│   ├── hf_to_qdrant.py     # HuggingFace Dataset -> Qdrant 数据库
-│   └── eval_infer.py       # 模型评估工具
-├── train/                  # 训练代码
-│   ├── model.py            # EmbeatMLP 模型定义
-│   ├── dataset.py          # 数据集处理
-│   ├── sampler.py          # 正负样本采样器
-│   ├── loss.py             # Masked InfoNCE Loss
-│   ├── trainer.py          # 训练器
-│   ├── train.py            # EmbeatMLP 训练入口
-│   └── train_track2vec.py  # Track2Vec 训练入口
-├── requirements.txt
-└── LICENSE
-```
 
 ## 相关链接
 
 <p align="center">
-  <img src="assets/gdmusic_embeat.png" alt="Embeat Banner" width="100%">
+  <img src="assets/gdmusic_embeat.png" alt="GDMusic Embeat" width="100%">
 </p>
 
 - GD音乐台（在线体验）：[https://music.gdstudio.xyz](https://music.gdstudio.xyz)
 - B站：[https://space.bilibili.com/13715770](https://space.bilibili.com/13715770)
 - TG群：[https://t.me/gdstudio_music](https://t.me/gdstudio_music)
 
+
 ## 特别鸣谢
 
 - [Anna's Archive](https://annas-archive.org)
 - [Every Noise at Once](https://everynoise.com)
 
-## License
+
+## 开源协议
 
 | 范围 | 协议 |
 |------|------|

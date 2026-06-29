@@ -13,7 +13,7 @@
 
 ---
 
-# Embeat: Acoustic Feature Based Music Recommendation System
+# Embeat: A Music Recommendation System Based on Acoustic Features
 
 ## Introduction
 
@@ -21,24 +21,26 @@ Embeat is a music recommendation system built on Spotify acoustic feature data. 
 
 Key Features:
 
-- **Acoustic Similarity**: The EmbeatMLP model, trained on Spotify Audio Features (key, tempo, energy, valence, etc.), encodes acoustic features into 64-dimensional vectors
+- **Acoustic Similarity**: The EmbeatMLP model, trained on Spotify Audio Features (key, tempo, energy, valence, etc.), encodes acoustic features into 64-dim vectors
 - **Genre Awareness**: Leverages 6,000+ micro-genre tags to precisely assign genres to 2M+ artists, preventing "acoustically similar but stylistically different" recommendations
 - **Multi-Channel Recall**: 5 parallel recall channels (Acoustic Similarity / Same-Genre Popular / Same Artist / Similar Artists / Playlist Collaborative Filtering), merged and scored for final output
 - **Playlist Collaborative Filtering**: Track2Vec (Word2Vec-inspired) learns track co-occurrence patterns from 1.88M Spotify playlists
 - **Millisecond-Level Response**: Powered by the Qdrant vector database, retrieval across 45M tracks completes in 30–100ms
 
+
 ## Roadmap
 
-> If you find this project helpful, please give it a ⭐️ — it means a lot for an independent project, thanks!
+> If you find this project helpful, please give it a ⭐️. It means a lot to a personal project, thanks!
 
-- [x] 2026-06-26: Open-source initial codebase + [EmbeatMLP model weights](checkpoints/EmbeatMLP/)
-- [x] 2026-06-26: Open-source [45M tracks dataset](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [technical documentation](https://www.bilibili.com/opus/1218087093501165591)
-- [ ] 100 Stars: Open-source Qdrant database
-- [ ] 1K Stars: Open-source Track2Vec model weights + 1.8M playlists dataset
+- [x] **2026-06-26**: Open-source initial codebase + [EmbeatMLP model weights](checkpoints/EmbeatMLP/)
+- [x] **2026-06-26**: Open-source [45M tracks dataset](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [technical documentation](https://www.bilibili.com/opus/1218087093501165591)
+- [ ] **100 Stars**: Open-source Qdrant database
+- [ ] **1K Stars**: Open-source Track2Vec model weights + 1.8M playlists dataset
+
 
 ## Demo
 
-Below are example recommendation results from Embeat (seed track -> 3 best recommendations):
+> Below are example recommendation results from Embeat (please unmute before playing)
 
 <details open>
 <summary><b>Uptown Funk - Bruno Mars [dance pop, pop]</b></summary>
@@ -72,7 +74,7 @@ Below are example recommendation results from Embeat (seed track -> 3 best recom
 </table>
 </details>
 
-<details open>
+<details>
 <summary><b>杀死那个石家庄人 - 万能青年旅店 [chinese indie rock]</b></summary>
 <table>
 <tr>
@@ -104,7 +106,7 @@ Below are example recommendation results from Embeat (seed track -> 3 best recom
 </table>
 </details>
 
-<details open>
+<details>
 <summary><b>Sis puella magica! - 梶浦由記 [anime score, japanese vgm]</b></summary>
 <table>
 <tr>
@@ -136,7 +138,7 @@ Below are example recommendation results from Embeat (seed track -> 3 best recom
 </table>
 </details>
 
-<details open>
+<details>
 <summary><b>Gizeh - Oskar Schuster [compositional ambient]</b></summary>
 <table>
 <tr>
@@ -170,8 +172,6 @@ Below are example recommendation results from Embeat (seed track -> 3 best recom
 
 ### LLM Blind Evaluation
 
-<b>For detailed comparison, please refer to the [technical documentation](https://www.bilibili.com/opus/1218087093501165591)</b>
-
 Using the LLM-as-a-Judge method (GPT-5.5 / Gemini Flash 3.5 / Claude Sonnet 4.6), Embeat was blindly evaluated against Netease Cloud Music in AB tests:
 
 | Judge Model | Embeat Wins | Netease Wins | Tie |
@@ -180,7 +180,33 @@ Using the LLM-as-a-Judge method (GPT-5.5 / Gemini Flash 3.5 / Claude Sonnet 4.6)
 | Gemini Flash 3.5 | **9** | 1 | 0 |
 | GPT 5.5 | **6** | 4 | 0 |
 
+**Conclusions:**
+
+- Embeat's core strength lies in its balance between style precision and artist diversity, with a particularly notable advantage in niche-style scenarios that span across languages and cultures
+- Netease Cloud Music retains some reference value only in its deep mining of Mandarin-language local content
+- For detailed comparison, please refer to the [technical documentation](https://www.bilibili.com/opus/1218087093501165591)
+
+
 ## System Architecture
+
+### Model Details
+
+**EmbeatMLP** - Acoustic Feature Encoding Model
+
+- Input: 64-dim discrete features (key, mode, tempo, time_signature) + 64-dim continuous features (energy, valence, danceability, etc., 7 dimensions)
+- Architecture: Dual-tower MLP (Discrete Tower + Acoustic Tower -> Backbone)
+- Output: 64-dim L2-normalized vectors
+- Training: Masked InfoNCE Loss, batch_size=4096, converges in ~70 steps
+- Extremely small parameter count, supports real-time CPU-only inference
+
+**Track2Vec** - Playlist Collaborative Filtering Model
+
+- Based on Word2Vec Skip-Gram, treating playlists as "sentences" and tracks as "words"
+- Training data: 1.88M Spotify playlists
+- Vocabulary: 1.09M tracks, 64-dim vectors
+- Supports real-time CPU-only inference, single query latency < 200ms
+
+### Multi-Channel Recall
 
 ```
 Input seed track: track_id / track_name + artist_name
@@ -196,26 +222,37 @@ Input seed track: track_id / track_name + artist_name
   └─ Output: Top-K Recommendation List
 ```
 
-### Model Details
+### Project Structure
 
-**EmbeatMLP** - Acoustic Feature Encoding Model
+```
+Embeat/
+├── assets/                 # Static assets folder
+├── checkpoints/            # Model weights folder
+│   ├── EmbeatMLP/          # EmbeatMLP model weights
+│   └── Track2Vec/          # Track2Vec model weights (requires separate download)
+├── data/                   # Data processing folder (not fully organized)
+├── infer/                  # Inference code folder
+│   ├── Embeat.py           # Embeat recommendation system core
+│   ├── EmbeatUtils.py      # Embeat extension utilities
+│   ├── infer.py            # EmbeatMLP inference entry point
+│   ├── eval_infer.py       # EmbeatMLP evaluation utilities
+│   └── hf_to_qdrant.py     # HF Dataset to Qdrant database
+├── train/                  # Training code folder
+│   ├── model.py            # EmbeatMLP model definition
+│   ├── dataset.py          # HF Dataset processing
+│   ├── sampler.py          # Positive/negative sample sampler
+│   ├── loss.py             # Masked InfoNCE Loss
+│   ├── trainer.py          # EmbeatMLP trainer
+│   ├── train.py            # EmbeatMLP training entry point
+│   └── train_track2vec.py  # Track2Vec training entry point
+├── requirements.txt
+└── LICENSE
+```
 
-- Input: Discrete features (key, mode, tempo, time_signature) + continuous features (energy, valence, danceability, etc., 7 dimensions)
-- Architecture: Dual-tower MLP (Discrete Tower + Acoustic Tower -> Backbone)
-- Output: 64-dimensional L2-normalized vectors
-- Training: Masked InfoNCE Loss, batch_size=4096, converges in ~70 steps
-- Extremely small parameter count, supports real-time CPU-only inference
-
-**Track2Vec** - Playlist Collaborative Filtering Model
-
-- Based on Word2Vec Skip-Gram, treating playlists as "sentences" and tracks as "words"
-- Training data: 1.88M Spotify playlists
-- Vocabulary: 1.09M tracks, 64-dimensional vectors
-- Single query latency < 200ms
 
 ## Getting Started
 
-### Requirements
+### Requirements (recommended)
 
 - Python >= 3.10
 - PyTorch >= 2.6, < 2.7 (required for training)
@@ -272,7 +309,8 @@ song_b = {"key": 5, "mode": 0, "tempo": 87, "time_signature": 4,
 
 similarity = infer(sample_a=song_a, sample_b=song_b,
                    checkpoint_path="checkpoints/EmbeatMLP/model.pt")
-print(f"Similarity: {similarity:.4f}")
+
+print(f"Similarity: {similarity}")
 ```
 
 ### Inference: Qdrant-Based Music Recommendation
@@ -286,46 +324,23 @@ python Embeat.py -s "晴天 - Jay Chou"   # Query by track name and artist
 python Embeat.py -a "Jay Chou"   # Query by artist name
 ```
 
-## Project Structure
 
-```
-Embeat/
-├── assets/                 # Static assets
-├── checkpoints/
-│   ├── EmbeatMLP/          # EmbeatMLP model weights
-│   └── Track2Vec/          # Track2Vec model weights (requires separate download)
-├── data/                   # Data processing scripts (not fully organized)
-├── infer/                  # Inference code
-│   ├── Embeat.py           # Recommendation system core (multi-channel recall + re-ranking)
-│   ├── infer.py            # EmbeatMLP inference entry point
-│   ├── hf_to_qdrant.py     # HuggingFace Dataset -> Qdrant database
-│   └── eval_infer.py       # Model evaluation utilities
-├── train/                  # Training code
-│   ├── model.py            # EmbeatMLP model definition
-│   ├── dataset.py          # Dataset processing
-│   ├── sampler.py          # Positive/negative sample sampler
-│   ├── loss.py             # Masked InfoNCE Loss
-│   ├── trainer.py          # Trainer
-│   ├── train.py            # EmbeatMLP training entry point
-│   └── train_track2vec.py  # Track2Vec training entry point
-├── requirements.txt
-└── LICENSE
-```
-
-## Links
+## Related Links
 
 <p align="center">
-  <img src="assets/gdmusic_embeat.png" alt="Embeat Banner" width="100%">
+  <img src="assets/gdmusic_embeat.png" alt="GDMusic Embeat" width="100%">
 </p>
 
 - GD Music (Live Demo): [https://music.gdstudio.xyz](https://music.gdstudio.xyz)
 - Bilibili: [https://space.bilibili.com/13715770](https://space.bilibili.com/13715770)
 - Telegram: [https://t.me/gdstudio_music](https://t.me/gdstudio_music)
 
+
 ## Acknowledgements
 
 - [Anna's Archive](https://annas-archive.org)
 - [Every Noise at Once](https://everynoise.com)
+
 
 ## License
 
