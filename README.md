@@ -3,11 +3,7 @@
 </p>
 
 <p align="center">
-  <b>Embeat - Acoustic Feature-Based Music Recommendation System</b>
-</p>
-
-<p align="center">
-  <b>English</b> | <a href="README_zh.md">中文</a>
+  <b>English</b> | <a href="README_zh.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -16,6 +12,8 @@
 </p>
 
 ---
+
+# Embeat: Acoustic Feature Based Music Recommendation System
 
 ## Introduction
 
@@ -31,61 +29,152 @@ Key Features:
 
 ## Roadmap
 
+> If you find this project helpful, please give it a Star — it means a lot for an independent project!
+
 - [x] 2026-06-26: Open-source initial codebase + [EmbeatMLP model weights](checkpoints/EmbeatMLP/)
 - [x] 2026-06-26: Open-source [45M tracks dataset](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [technical documentation](https://www.bilibili.com/opus/1218087093501165591)
 - [ ] 100 Stars: Open-source Qdrant database
-- [ ] 1K Stars: Open-source Track2Vec model weights + 6.6M playlist dataset
+- [ ] 1K Stars: Open-source Track2Vec model weights + 1.8M playlists dataset
 
 ## Demo
 
-Below are example recommendation results from Embeat (seed track -> Top 5 recommendations):
+Below are example recommendation results from Embeat (seed track -> 3 best recommendations):
 
-<details>
-<summary><b>晴天 - Jay Chou [mandopop, taiwan pop, c-pop]</b></summary>
-
-| # | Track | Artist | Source |
-|---|-------|--------|--------|
-| 1 | 告白氣球 | Jay Chou | Same-Genre Popular, Same Artist, Playlist CF |
-| 2 | 突然好想你 | Mayday | Same-Genre Popular, Similar Artists |
-| 3 | 怎麼了 | Eric Chou | Same-Genre Popular, Playlist CF |
-| 4 | 飞鸟和蝉 | Ren Ran | Playlist CF |
-| 5 | 你的背包 | Eason Chan | Similar Artists |
-
+<details open>
+<summary><b>Uptown Funk - Bruno Mars [dance pop, pop]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>Uptown Funk - Bruno Mars</td>
+<td>CAN'T STOP THE FEELING! - Justin Timberlake</td>
+<td>Happy - Pharrell Williams</td>
+<td>I Like to Move It - will.i.am</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/e22f726e-eb61-49c1-ab17-91cda503293d
+</td>
+<td>
+https://github.com/user-attachments/assets/a571d075-1527-4d57-8ca7-a2f285e04de6
+</td>
+<td>
+https://github.com/user-attachments/assets/8ba236f0-f28e-4083-8561-00fcbfb49a98
+</td>
+<td>
+https://github.com/user-attachments/assets/1758195d-34c0-485c-b627-5b6d26e00b17
+</td>
+</tr>
+</table>
 </details>
 
-<details>
-<summary><b>Uptown Funk (feat. Bruno Mars) - Bruno Mars [dance pop, pop]</b></summary>
-
-| # | Track | Artist | Source |
-|---|-------|--------|--------|
-| 1 | That's What I Like | Bruno Mars | Same-Genre Popular, Same Artist, Playlist CF |
-| 2 | Timber | Pitbull | Same-Genre Popular, Playlist CF |
-| 3 | CAN'T STOP THE FEELING! | Justin Timberlake | Playlist CF |
-| 4 | Happy | Pharrell Williams | Playlist CF |
-| 5 | Sugar | Maroon 5 | Playlist CF |
-
+<details open>
+<summary><b>杀死那个石家庄人 - 万能青年旅店 [chinese indie rock]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>杀死那个石家庄人 - 万能青年旅店</td>
+<td>大石碎胸口 - 万能青年旅店</td>
+<td>凄美地 - 郭顶</td>
+<td>不要停止我的音乐 - 痛仰乐队</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/48eb51b0-0796-42e1-a54f-8a46a49d2916
+</td>
+<td>
+https://github.com/user-attachments/assets/e98e555f-8ac9-4fd0-9254-f440a6e0008e
+</td>
+<td>
+https://github.com/user-attachments/assets/535fec8c-3da1-4ba0-8bfa-bb0889cd698d
+</td>
+<td>
+https://github.com/user-attachments/assets/857666db-45f8-47df-86d2-32e51a679855
+</td>
+</tr>
+</table>
 </details>
 
-<details>
+<details open>
 <summary><b>Sis puella magica! - 梶浦由記 [anime score, japanese vgm]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>Sis puella magica! - 梶浦由記</td>
+<td>Decretum - 梶浦由記</td>
+<td>Zoltraak - Evan Call</td>
+<td>Arrietty's Song - Cécile Corbel</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/caa287b2-d477-443b-84e6-2135c8b2b4be
+</td>
+<td>
+https://github.com/user-attachments/assets/f8caff21-35e3-4620-958e-a2ea1ed4eec5
+</td>
+<td>
+https://github.com/user-attachments/assets/bc3048e6-279d-4010-bc7d-81b705dc2b2c
+</td>
+<td>
+https://github.com/user-attachments/assets/7b197556-9ea6-4c1b-a04b-6221975a9273
+</td>
+</tr>
+</table>
+</details>
 
-| # | Track | Artist | Source |
-|---|-------|--------|--------|
-| 1 | Conturbatio | 梶浦 由記 | Same Artist, Playlist CF |
-| 2 | 輝く空の静寂には | Kalafina | Similar Artists |
-| 3 | Forbidden Love | Cécile Corbel | Acoustic Similarity |
-| 4 | ARIA | Kalafina | Similar Artists |
-| 5 | Zoltraak | Evan Call | Same-Genre Popular |
-
+<details open>
+<summary><b>Gizeh - Oskar Schuster [compositional ambient]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>Gizeh - Oskar Schuster</td>
+<td>Vleurgat - Oskar Schuster</td>
+<td>Sleeping Lotus - Joep Beving</td>
+<td>Travelling - James Spiteri</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/f10fad24-0f7b-43e3-ad11-879a7961a86a
+</td>
+<td>
+https://github.com/user-attachments/assets/1ce856b6-0e40-4d42-98a1-af458480e89f
+</td>
+<td>
+https://github.com/user-attachments/assets/b1413a46-243d-480c-a3d7-890789ff34f2
+</td>
+<td>
+https://github.com/user-attachments/assets/992e7662-2fe3-445b-8d14-6cb6417bbed5
+</td>
+</tr>
+</table>
 </details>
 
 ### LLM Blind Evaluation
 
 <b>For detailed comparison, please refer to the [technical documentation](https://www.bilibili.com/opus/1218087093501165591)</b>
 
-Using the LLM-as-a-Judge method (GPT-5.5 / Gemini Flash 3.5 / Claude Sonnet 4.6), Embeat was blindly evaluated against NetEase Cloud Music in AB tests:
+Using the LLM-as-a-Judge method (GPT-5.5 / Gemini Flash 3.5 / Claude Sonnet 4.6), Embeat was blindly evaluated against Netease Cloud Music in AB tests:
 
-| Judge Model | Embeat Wins | NetEase Wins | Tie |
+| Judge Model | Embeat Wins | Netease Wins | Tie |
 |-------------|:-----------:|:------------:|:---:|
 | Claude Sonnet 4.6 | **8** | 2 | 0 |
 | Gemini Flash 3.5 | **9** | 1 | 0 |
@@ -94,13 +183,13 @@ Using the LLM-as-a-Judge method (GPT-5.5 / Gemini Flash 3.5 / Claude Sonnet 4.6)
 ## System Architecture
 
 ```
-Input: track_id / track_name + artist_name
+Input seed track: track_id / track_name + artist_name
   │
-  ├─ Channel 1: Acoustic Similarity Recall (EmbeatMLP vectors + genre filtering)
-  ├─ Channel 2: Same-Genre Popular Recall (genre tags + popularity ranking)
-  ├─ Channel 3: Same Artist Recall (artist_idx + popularity ranking)
-  ├─ Channel 4: Similar Artists Recall (Spotify Related Artists + vector ranking)
-  ├─ Channel 5: Playlist Collaborative Filtering (Track2Vec)
+  ├─ Channel 1: Acoustic Similarity Recall (genre filtering + EmbeatMLP cosine similarity)
+  ├─ Channel 2: Same-Genre Popular Recall (genre filtering + popularity ranking)
+  ├─ Channel 3: Same Artist Recall (same artist + EmbeatMLP cosine similarity)
+  ├─ Channel 4: Similar Artists Recall (similar artists + EmbeatMLP cosine similarity)
+  ├─ Channel 5: Playlist Collaborative Filtering (Track2Vec cosine similarity)
   │
   ├─ ISRC Deduplication / Re-ranking / Same-Artist Ratio Control
   │
@@ -122,7 +211,7 @@ Input: track_id / track_name + artist_name
 - Based on Word2Vec Skip-Gram, treating playlists as "sentences" and tracks as "words"
 - Training data: 1.88M Spotify playlists
 - Vocabulary: 1.09M tracks, 64-dimensional vectors
-- Single query latency < 0.1ms
+- Single query latency < 200ms
 
 ## Getting Started
 
@@ -148,7 +237,7 @@ pip install -r requirements.txt
 ### Train EmbeatMLP
 
 ```bash
-# Prepare training data in HuggingFace Dataset format under data/datasets/
+# Prepare training data in HuggingFace Dataset format under data/datasets/, rename to spotify_45m_tracks_metadata
 python -m train.train \
     --dataset data/datasets/spotify_45m_tracks_metadata@10000000 \
     --batch-size 4096 \
@@ -242,5 +331,5 @@ Embeat/
 
 | Scope | License |
 |-------|---------|
-| Code, Model Weights | [MIT](LICENSE-MIT) |
+| Code, Model Weights | MIT |
 | Datasets, Database | [CC-BY-NC 4.0](LICENSE) |

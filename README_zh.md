@@ -3,11 +3,7 @@
 </p>
 
 <p align="center">
-  <b>Embeat - 基于声学特征的音乐推荐系统</b>
-</p>
-
-<p align="center">
-  <a href="README.md">English</a> | <b>中文</b>
+  <a href="README.md">English</a> | <b>简体中文</b>
 </p>
 
 <p align="center">
@@ -16,6 +12,8 @@
 </p>
 
 ---
+
+# Embeat：基于声学特征的音乐推荐系统
 
 ## 简介
 
@@ -29,54 +27,145 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 - **歌单协同过滤**：通过 Track2Vec（Word2Vec 思路）学习 188 万份 Spotify 歌单中歌曲的共现关系
 - **毫秒级响应**：基于 Qdrant 向量数据库，4500 万首歌曲的检索响应在 30~100ms 内完成
 
-## Roadmap
+## 开源路线
+
+> 如果觉得项目有帮助，请帮忙点个 Star，这对个人项目来说非常重要！
 
 - [x] 2026-06-26：开源 初版代码 + [EmbeatMLP 模型权重](checkpoints/EmbeatMLP/)
 - [x] 2026-06-26：开源 [45M 单曲数据集](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [技术文档](https://www.bilibili.com/opus/1218087093501165591)
 - [ ] 100 Star：开源 Qdrant 数据库
-- [ ] 1K Star：开源 Track2Vec 模型权重 + 6.6M 歌单数据集
+- [ ] 1K Star：开源 Track2Vec 模型权重 + 1.8M 歌单数据集
 
 ## 效果展示
 
-以下是 Embeat 的推荐结果示例（种子曲目 -> Top 5 推荐歌曲）：
+以下是 Embeat 的推荐结果示例（种子曲目 -> 3首最佳推荐）：
 
-<details>
-<summary><b>晴天 - Jay Chou [mandopop, taiwan pop, c-pop]</b></summary>
-
-| # | 歌曲 | 歌手 | 来源 |
-|---|------|------|------|
-| 1 | 告白氣球 | Jay Chou | 同流派热门, 同歌手, 歌单协同 |
-| 2 | 突然好想你 | Mayday | 同流派热门, 相似歌手 |
-| 3 | 怎麼了 | Eric Chou | 同流派热门, 歌单协同 |
-| 4 | 飞鸟和蝉 | Ren Ran | 歌单协同 |
-| 5 | 你的背包 | Eason Chan | 相似歌手 |
-
+<details open>
+<summary><b>Uptown Funk - Bruno Mars [dance pop, pop]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>Uptown Funk - Bruno Mars</td>
+<td>CAN'T STOP THE FEELING! - Justin Timberlake</td>
+<td>Happy - Pharrell Williams</td>
+<td>I Like to Move It - will.i.am</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/e22f726e-eb61-49c1-ab17-91cda503293d
+</td>
+<td>
+https://github.com/user-attachments/assets/a571d075-1527-4d57-8ca7-a2f285e04de6
+</td>
+<td>
+https://github.com/user-attachments/assets/8ba236f0-f28e-4083-8561-00fcbfb49a98
+</td>
+<td>
+https://github.com/user-attachments/assets/1758195d-34c0-485c-b627-5b6d26e00b17
+</td>
+</tr>
+</table>
 </details>
 
-<details>
-<summary><b>Uptown Funk (feat. Bruno Mars) - Bruno Mars [dance pop, pop]</b></summary>
-
-| # | 歌曲 | 歌手 | 来源 |
-|---|------|------|------|
-| 1 | That's What I Like | Bruno Mars | 同流派热门, 同歌手, 歌单协同 |
-| 2 | Timber | Pitbull | 同流派热门, 歌单协同 |
-| 3 | CAN'T STOP THE FEELING! | Justin Timberlake | 歌单协同 |
-| 4 | Happy | Pharrell Williams | 歌单协同 |
-| 5 | Sugar | Maroon 5 | 歌单协同 |
-
+<details open>
+<summary><b>杀死那个石家庄人 - 万能青年旅店 [chinese indie rock]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>杀死那个石家庄人 - 万能青年旅店</td>
+<td>大石碎胸口 - 万能青年旅店</td>
+<td>凄美地 - 郭顶</td>
+<td>不要停止我的音乐 - 痛仰乐队</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/48eb51b0-0796-42e1-a54f-8a46a49d2916
+</td>
+<td>
+https://github.com/user-attachments/assets/e98e555f-8ac9-4fd0-9254-f440a6e0008e
+</td>
+<td>
+https://github.com/user-attachments/assets/535fec8c-3da1-4ba0-8bfa-bb0889cd698d
+</td>
+<td>
+https://github.com/user-attachments/assets/857666db-45f8-47df-86d2-32e51a679855
+</td>
+</tr>
+</table>
 </details>
 
-<details>
+<details open>
 <summary><b>Sis puella magica! - 梶浦由記 [anime score, japanese vgm]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>Sis puella magica! - 梶浦由記</td>
+<td>Decretum - 梶浦由記</td>
+<td>Zoltraak - Evan Call</td>
+<td>Arrietty's Song - Cécile Corbel</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/caa287b2-d477-443b-84e6-2135c8b2b4be
+</td>
+<td>
+https://github.com/user-attachments/assets/f8caff21-35e3-4620-958e-a2ea1ed4eec5
+</td>
+<td>
+https://github.com/user-attachments/assets/bc3048e6-279d-4010-bc7d-81b705dc2b2c
+</td>
+<td>
+https://github.com/user-attachments/assets/7b197556-9ea6-4c1b-a04b-6221975a9273
+</td>
+</tr>
+</table>
+</details>
 
-| # | 歌曲 | 歌手 | 来源 |
-|---|------|------|------|
-| 1 | Conturbatio | 梶浦 由記 | 同歌手, 歌单协同 |
-| 2 | 輝く空の静寂には | Kalafina | 相似歌手 |
-| 3 | Forbidden Love | Cécile Corbel | 声学相似 |
-| 4 | ARIA | Kalafina | 相似歌手 |
-| 5 | Zoltraak | Evan Call | 同流派热门 |
-
+<details open>
+<summary><b>Gizeh - Oskar Schuster [compositional ambient]</b></summary>
+<table>
+<tr>
+<th width="25%">Seed Track</th>
+<th width="25%">Embeat #1</th>
+<th width="25%">Embeat #2</th>
+<th width="25%">Embeat #3</th>
+</tr>
+<tr>
+<td>Gizeh - Oskar Schuster</td>
+<td>Vleurgat - Oskar Schuster</td>
+<td>Sleeping Lotus - Joep Beving</td>
+<td>Travelling - James Spiteri</td>
+</tr>
+<tr>
+<td>
+https://github.com/user-attachments/assets/f10fad24-0f7b-43e3-ad11-879a7961a86a
+</td>
+<td>
+https://github.com/user-attachments/assets/1ce856b6-0e40-4d42-98a1-af458480e89f
+</td>
+<td>
+https://github.com/user-attachments/assets/b1413a46-243d-480c-a3d7-890789ff34f2
+</td>
+<td>
+https://github.com/user-attachments/assets/992e7662-2fe3-445b-8d14-6cb6417bbed5
+</td>
+</tr>
+</table>
 </details>
 
 ### LLM 盲评对比
@@ -85,7 +174,7 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 
 使用 LLM-as-a-Judge 方法（GPT-5.5 / Gemini Flash 3.5 / Claude Sonnet 4.6），对 Embeat 与网易云音乐进行 AB 盲测：
 
-| 评估模型 | Embeat 胜 | 网易云胜 | 平局 |
+| 评估模型 | Embeat胜 | 网易云胜 | 平局 |
 |---------|:---------:|:-------:|:----:|
 | Claude Sonnet 4.6 | **8** | 2 | 0 |
 | Gemini Flash 3.5 | **9** | 1 | 0 |
@@ -94,13 +183,13 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 ## 系统架构
 
 ```
-输入: track_id / track_name + artist_name
+输入种子曲目: track_id / track_name + artist_name
   │
-  ├─ 第1路: 声学相似召回 (EmbeatMLP向量 + 流派过滤)
-  ├─ 第2路: 同流派热门召回 (流派标签 + 热度排序)
-  ├─ 第3路: 同歌手召回 (artist_idx + 热度排序)
-  ├─ 第4路: 相似歌手召回 (Spotify Related Artists + 向量排序)
-  ├─ 第5路: 歌单协同过滤 (Track2Vec)
+  ├─ 第1路: 声学相似召回 (流派过滤 + EmbeatMLP余弦相似)
+  ├─ 第2路: 同流派热门召回 (流派过滤 + 热度排序)
+  ├─ 第3路: 同歌手召回 (相同歌手 + EmbeatMLP余弦相似)
+  ├─ 第4路: 相似歌手召回 (相似歌手 + EmbeatMLP余弦相似)
+  ├─ 第5路: 歌单协同过滤 (Track2Vec余弦相似)
   │
   ├─ ISRC去重 / 重排打分 / 同歌手比例控制
   │
@@ -122,7 +211,7 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 - 基于 Word2Vec Skip-Gram，将歌单视为"句子"，歌曲视为"单词"
 - 训练数据：188 万份 Spotify 歌单
 - 词表：109 万首歌曲，64 维向量
-- 单次查询耗时 < 0.1ms
+- 单次查询耗时 < 200ms
 
 ## 快速开始
 
@@ -148,7 +237,7 @@ pip install -r requirements.txt
 ### 训练 EmbeatMLP
 
 ```bash
-# 准备 HuggingFace Dataset 格式的训练数据，放到 data/datasets/ 目录下
+# 准备 HuggingFace Dataset 格式的训练数据，放到 data/datasets/ 目录下，重命名为 spotify_45m_tracks_metadata
 python -m train.train \
     --dataset data/datasets/spotify_45m_tracks_metadata@10000000 \
     --batch-size 4096 \
@@ -242,5 +331,5 @@ Embeat/
 
 | 范围 | 协议 |
 |------|------|
-| 代码、模型权重 | [MIT](LICENSE-MIT) |
+| 代码、模型权重 | MIT |
 | 数据集、数据库 | [CC-BY-NC 4.0](LICENSE) |
