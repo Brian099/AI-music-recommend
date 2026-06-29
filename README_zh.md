@@ -29,7 +29,7 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 
 ## 开源路线
 
-> 如果觉得项目有帮助，请帮忙点个 Star，这对个人项目来说非常重要！
+> 如果觉得项目有帮助，请帮忙点个⭐️，这对个人项目来说很重要，谢谢！
 
 - [x] 2026-06-26：开源 初版代码 + [EmbeatMLP 模型权重](checkpoints/EmbeatMLP/)
 - [x] 2026-06-26：开源 [45M 单曲数据集](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [技术文档](https://www.bilibili.com/opus/1218087093501165591)
@@ -57,16 +57,16 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 </tr>
 <tr>
 <td>
-https://github.com/user-attachments/assets/e22f726e-eb61-49c1-ab17-91cda503293d
+<video src="https://github.com/user-attachments/assets/e22f726e-eb61-49c1-ab17-91cda503293d" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/a571d075-1527-4d57-8ca7-a2f285e04de6
+<video src="https://github.com/user-attachments/assets/a571d075-1527-4d57-8ca7-a2f285e04de6" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/8ba236f0-f28e-4083-8561-00fcbfb49a98
+<video src="https://github.com/user-attachments/assets/8ba236f0-f28e-4083-8561-00fcbfb49a98" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/1758195d-34c0-485c-b627-5b6d26e00b17
+<video src="https://github.com/user-attachments/assets/1758195d-34c0-485c-b627-5b6d26e00b17" controls width="100%"></video>
 </td>
 </tr>
 </table>
@@ -89,16 +89,16 @@ https://github.com/user-attachments/assets/1758195d-34c0-485c-b627-5b6d26e00b17
 </tr>
 <tr>
 <td>
-https://github.com/user-attachments/assets/48eb51b0-0796-42e1-a54f-8a46a49d2916
+<video src="https://github.com/user-attachments/assets/48eb51b0-0796-42e1-a54f-8a46a49d2916" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/e98e555f-8ac9-4fd0-9254-f440a6e0008e
+<video src="https://github.com/user-attachments/assets/e98e555f-8ac9-4fd0-9254-f440a6e0008e" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/535fec8c-3da1-4ba0-8bfa-bb0889cd698d
+<video src="https://github.com/user-attachments/assets/535fec8c-3da1-4ba0-8bfa-bb0889cd698d" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/857666db-45f8-47df-86d2-32e51a679855
+<video src="https://github.com/user-attachments/assets/857666db-45f8-47df-86d2-32e51a679855" controls width="100%"></video>
 </td>
 </tr>
 </table>
@@ -121,16 +121,16 @@ https://github.com/user-attachments/assets/857666db-45f8-47df-86d2-32e51a679855
 </tr>
 <tr>
 <td>
-https://github.com/user-attachments/assets/caa287b2-d477-443b-84e6-2135c8b2b4be
+<video src="https://github.com/user-attachments/assets/caa287b2-d477-443b-84e6-2135c8b2b4be" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/f8caff21-35e3-4620-958e-a2ea1ed4eec5
+<video src="https://github.com/user-attachments/assets/f8caff21-35e3-4620-958e-a2ea1ed4eec5" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/bc3048e6-279d-4010-bc7d-81b705dc2b2c
+<video src="https://github.com/user-attachments/assets/bc3048e6-279d-4010-bc7d-81b705dc2b2c" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/7b197556-9ea6-4c1b-a04b-6221975a9273
+<video src="https://github.com/user-attachments/assets/7b197556-9ea6-4c1b-a04b-6221975a9273" controls width="100%"></video>
 </td>
 </tr>
 </table>
@@ -153,16 +153,16 @@ https://github.com/user-attachments/assets/7b197556-9ea6-4c1b-a04b-6221975a9273
 </tr>
 <tr>
 <td>
-https://github.com/user-attachments/assets/f10fad24-0f7b-43e3-ad11-879a7961a86a
+<video src="https://github.com/user-attachments/assets/f10fad24-0f7b-43e3-ad11-879a7961a86a" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/1ce856b6-0e40-4d42-98a1-af458480e89f
+<video src="https://github.com/user-attachments/assets/1ce856b6-0e40-4d42-98a1-af458480e89f" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/b1413a46-243d-480c-a3d7-890789ff34f2
+<video src="https://github.com/user-attachments/assets/b1413a46-243d-480c-a3d7-890789ff34f2" controls width="100%"></video>
 </td>
 <td>
-https://github.com/user-attachments/assets/992e7662-2fe3-445b-8d14-6cb6417bbed5
+<video src="https://github.com/user-attachments/assets/992e7662-2fe3-445b-8d14-6cb6417bbed5" controls width="100%"></video>
 </td>
 </tr>
 </table>
@@ -228,7 +228,7 @@ https://github.com/user-attachments/assets/992e7662-2fe3-445b-8d14-6cb6417bbed5
 conda create -n embeat python=3.10
 conda activate embeat
 
-# 安装 PyTorch (CUDA 12.x)，参考 https://pytorch.org/get-started/locally/
+# 安装 PyTorch (CUDA 12.x)，参考 https://pytorch.org/get-started/previous-versions/
 pip install "torch>=2.6,<2.7" --index-url https://download.pytorch.org/whl/cu126
 
 pip install -r requirements.txt
