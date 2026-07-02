@@ -7,6 +7,14 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/gdstudio-org/Embeat">主页</a> •
+  <a href="https://www.bilibili.com/opus/1218087093501165591">技术文档</a> •
+  <a href="https://github.com/gdstudio-org/Embeat/tree/main/checkpoints">模型</a> •
+  <a href="https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks">数据集</a> •
+  <a href="https://pan.baidu.com/s/1CWFzgM75Z4YjP1tZnGCZKg?pwd=0616">数据库</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/gdstudio-org/Embeat"><img src="https://img.shields.io/github/stars/gdstudio-org/Embeat?style=social" alt="Stars"></a>
   <a href="https://github.com/gdstudio-org/Embeat/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-CC--BY--NC%204.0-blue" alt="License"></a>
 </p>
@@ -19,7 +27,7 @@
 
 Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，通过**对比学习模型**将音频特征编码为向量，结合**多路召回**策略实现高质量的音乐推荐。
 
-核心特点：
+**核心特点：**
 
 - **声学相似**：基于 Spotify Audio Features（调性、节拍、能量、情绪等）训练的 EmbeatMLP 模型，将声学特征编码为 64 维向量
 - **流派感知**：引入 6000+ 微流派标签，为 200 万+ 歌手精准分配流派，避免"声学相似但风格迥异"的推荐
@@ -34,8 +42,8 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 
 - [x] **2026-06-26**：开源 初版代码 + [EmbeatMLP 模型权重](checkpoints/EmbeatMLP/)
 - [x] **2026-06-26**：开源 [45M 单曲数据集](https://huggingface.co/datasets/GD-Studio/embeat_45m_spotify_tracks) + [技术文档](https://www.bilibili.com/opus/1218087093501165591)
-- [ ] **100 Star**：开源 Qdrant 数据库
-- [ ] **1K Star**：开源 Track2Vec 模型权重 + 1.8M 歌单数据集
+- [x] **2026-07-02**：开源 [Qdrant 数据库](https://pan.baidu.com/s/1CWFzgM75Z4YjP1tZnGCZKg?pwd=0616) (提取码：0616)
+- [ ] **1K Stars**：开源 Track2Vec 模型权重 + 1.8M 歌单数据集
 
 
 ## 效果展示
@@ -211,11 +219,11 @@ Embeat 是一个基于 Spotify 声学特征数据构建的歌曲推荐系统，�
 ```
 输入种子曲目: track_id / track_name + artist_name
   │
-  ├─ 第1路: 声学相似召回 (流派过滤 + EmbeatMLP余弦相似)
-  ├─ 第2路: 同流派热门召回 (流派过滤 + 热度排序)
-  ├─ 第3路: 同歌手召回 (相同歌手 + EmbeatMLP余弦相似)
-  ├─ 第4路: 相似歌手召回 (相似歌手 + EmbeatMLP余弦相似)
-  ├─ 第5路: 歌单协同过滤 (Track2Vec余弦相似)
+  ├─ 第1路 [similar]: 声学相似召回 (流派过滤 + EmbeatMLP余弦相似)
+  ├─ 第2路 [popular]: 同流派热门召回 (流派过滤 + 热度排序)
+  ├─ 第3路 [same_artist]: 同歌手召回 (相同歌手 + EmbeatMLP余弦相似)
+  ├─ 第4路 [related_artist]: 相似歌手召回 (相似歌手 + EmbeatMLP余弦相似)
+  ├─ 第5路 [related_track]: 歌单协同过滤 (Track2Vec余弦相似)
   │
   ├─ ISRC去重 / 重排打分 / 同歌手比例控制
   │
@@ -274,20 +282,18 @@ pip install -r requirements.txt
 ### 训练 EmbeatMLP
 
 ```bash
-# 准备 HuggingFace Dataset 格式的训练数据，放到 data/datasets/ 目录下，重命名为 spotify_45m_tracks_metadata
-python -m train.train \
-    --dataset data/datasets/spotify_45m_tracks_metadata@10000000 \
-    --batch-size 4096 \
-    --max-steps 200 \
-    --lr 1e-4 \
-    --tau 0.05 \
-    --ckpt-dir checkpoints
+# 1. 下载 HuggingFace 单曲数据集，放到 `data/datasets/` 目录下，重命名为 `spotify_45m_tracks_metadata`
+# 2. 如果你希望做更细致的训练参数调整，请阅读代码
+cd train
+python train.py
 ```
 
 ### 训练 Track2Vec
 
 ```bash
-# 准备歌单训练数据 (txt格式，每行一个歌单，空格分隔track_id)
+# 1. 准备歌单训练数据 (txt格式，每行一个歌单，空格分隔track_id)
+# 2. 重命名为 `spotify_playlists.txt`，并放到 `train` 文件夹下
+# 3. 如果你希望做更细致的训练参数调整，请阅读代码
 cd train
 python train_track2vec.py
 ```
@@ -295,33 +301,77 @@ python train_track2vec.py
 ### 推理：计算两首歌的声学相似度
 
 ```python
+# 1. 从 HuggingFace 单曲数据集中获取声学特征数据
+# 2. 或者你可以从 infer/eval_infer.py 找到些现成例子
 from infer.infer import infer
 
+# 晴天 - Jay Chou (G大调快节奏)
 song_a = {"key": 7, "mode": 1, "tempo": 137, "time_signature": 4,
           "danceability": 0.54, "energy": 0.56, "speechiness": 0.02,
           "instrumentalness": 0.0, "valence": 0.41, "acousticness": 0.23,
           "liveness": 0.1}
 
+# 夜曲 - Jay Chou (F小调慢节奏)
 song_b = {"key": 5, "mode": 0, "tempo": 87, "time_signature": 4,
           "danceability": 0.67, "energy": 0.65, "speechiness": 0.05,
           "instrumentalness": 0.03, "valence": 0.57, "acousticness": 0.27,
           "liveness": 0.19}
 
+# 使用 EmbeatMLP 计算声学相似度
 similarity = infer(sample_a=song_a, sample_b=song_b,
                    checkpoint_path="checkpoints/EmbeatMLP/model.pt")
 
-print(f"Similarity: {similarity}")
+# 相似度：0.7312
+print(f"Similarity: {similarity:.4f}")
 ```
 
 ### 推理：基于 Qdrant 的歌曲推荐
 
 ```bash
 # 1. 启动 Qdrant 服务并导入数据库
-# 2. 通过命令行查询推荐
+# 2. 通过命令行查询种子曲目的推荐结果
 cd infer
 python Embeat.py -t 5pIcwtJYNJx93l420oR2Vm   # 通过 Spotify Track ID 查询
 python Embeat.py -s "晴天 - Jay Chou"   # 通过歌名和歌手查询
 python Embeat.py -a "Jay Chou"   # 通过歌手名查询
+
+
+# 输出例子《晴天 - Jay Chou》：
+Query track_id: 5pIcwtJYNJx93l420oR2Vm
+Query track info: 晴天 - Jay Chou
+Query artist genres: ['mandopop', 'taiwan pop', 'c-pop', 'zhongguo feng']
+-> Find query record used time: 21ms
+-> Similar recall used time: 48ms
+-> Popular recall used time: 24ms
+-> Same artist recall used time: 4ms
+-> Related artist recall used time: 5ms
+-> Related track recall used time: 123ms
+-> Re-ranking used time: 2ms
+Result artist genres: ['taiwan indie', 'mandopop', 'chinese viral pop', 'cantopop']
+======= Top 20 items =======
+index   track_id                track_name      artist_name     album_name      sources         score
+1       3Qj9Fy8BPbWmICTiNkuqB7  珊瑚海  Jay Chou        11月的蕭邦      ['same_artist', 'related_track']        1.0
+2       10VuSw48iPN2UK2xX9Y6P0  青花瓷  Jay Chou        我很忙  ['same_artist', 'related_track']        1.0
+3       0IAgufC1FlOg1nZMmRZxRr  突然好想你      Mayday  後 青春期的詩   ['popular', 'related_artist']   1.0
+4       2zB7NKVnzRh7xSUSPLErFr  明明就  Jay Chou        十二新作        ['same_artist', 'related_track']        1.0
+5       5WtMlbTDNZlbN8xZ5zfXva  Our Singapore   JJ Lin  My August 9th - 50 Wonderful Years (2016 Edition)       ['similar', 'related_artist']   1.0
+6       5cU1O9P0EDA0rPkPDykhIm  怎麼了  Eric Chou       終於了解自由 (Deluxe)   ['popular', 'related_track']    1.0
+7       4daA20tBusVX29bUWgd8Dw  交換餘生        JJ Lin  交換餘生        ['popular', 'related_track']    1.0
+8       1EgGTmmFGtlWuqgXFLrp9x  溫柔    Mayday  愛情萬歲        ['related_artist']      0.87
+9       3ZuyyfGJqx9qhWTVtdMCWz  生命線 - 電視劇《院長爸爸》片頭曲       Bii     生命線 (電視劇《院長爸爸》片頭曲)       ['similar']     0.85
+10      3p4UTiSIIpP4LFn0KEyEOj  十面埋伏        Eason Chan      Live For Today  ['related_artist']      0.85
+11      4lhbajK3dvUcJ0UNEeCdMn  飞鸟和蝉        Ren Ran         Ren然   ['related_track']       0.84
+12      3e8uw7YMiKVcIakItBENqm  天天晴朗（蘇打綠版）    sodagreen       秋：故事（蘇打綠版）    ['similar']     0.83
+13      26O8PmJ32hwAbZnIhbJJwZ  天使    Mayday  為愛而生        ['related_artist']      0.82
+14      3LgoekU3dE5ZMLvuL3NIt9  清醒 (戲劇《淺情人不知》片尾曲)         Ariel Tsai      清醒 (戲劇《淺情人不知》片尾曲)         ['similar']     0.81
+15      1WnTw4Tzpc5q9dHMjs4aHu  陰天快樂        Eason Chan      rice & shine    ['related_artist']      0.8
+16      14GFYAUxkeXranhS2qrYIZ  我想要佔據你    告五人  帶你飛  ['related_track']       0.8
+17      1ylx8p71GKQy5g1t4gzuEz  抱歉    Sam Lee         原諒我沒有說    ['similar']     0.79
+18      7fAdinC2UTc0Y9GiKrkTtu  字字句句        卢卢快闭嘴      字字句句        ['related_track']       0.78
+19      1VG8o5rUZQZ0wjs7Bi4siU  最熟悉的陌生人  Elva Hsiao      蕭亞軒 (最熟悉的)       ['similar']     0.77
+20      1lM4cYuhJHSsDRfD0ZCRN7  你的背包        Eason Chan      陳奕迅 國語精選 (HQCDII)        ['related_artist']      0.77
+
+Query used time: 0.229s
 ```
 
 
@@ -348,3 +398,5 @@ python Embeat.py -a "Jay Chou"   # 通过歌手名查询
 |------|------|
 | 代码、模型权重 | MIT |
 | 数据集、数据库 | [CC-BY-NC 4.0](LICENSE) |
+
+> Made with ❤️ by GD Studio
