@@ -253,6 +253,7 @@ Embeat/
 │   ├── trainer.py          # EmbeatMLP trainer
 │   ├── train.py            # EmbeatMLP training entry point
 │   └── train_track2vec.py  # Track2Vec training entry point
+├── .env.example            # Environment variables example for .env
 ├── requirements.txt
 └── LICENSE
 ```

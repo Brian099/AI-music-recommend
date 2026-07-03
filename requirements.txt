@@ -18,3 +18,4 @@ zhconv
 beautifulsoup4
 cloudscraper
 gensim
+python-dotenv

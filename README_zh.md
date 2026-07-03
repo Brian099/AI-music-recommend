@@ -253,6 +253,7 @@ Embeat/
 │   ├── trainer.py          # EmbeatMLP 训练器
 │   ├── train.py            # EmbeatMLP 训练入口
 │   └── train_track2vec.py  # Track2Vec 训练入口
+├── .env.example            # .env 环境变量配置示例
 ├── requirements.txt
 └── LICENSE
 ```
