@@ -215,6 +215,11 @@ class EmbeatDatabase:
     # Get Qdrant collection version by collection fields
     def get_collection_version(self, use_schema: bool = False):
         self.collection_version = "v3"
+        # If collection doesn't exist yet (fresh deployment), skip version detection
+        if not self.client.collection_exists(self.collection_name):
+            if self.verbose_log:
+                print(f"-> Collection '{self.collection_name}' not found, will be created on first /scan. Defaulting to version v3.")
+            return
         collection_fields = []
         if use_schema:
             collection_info = self.client.get_collection(collection_name=self.collection_name)
@@ -234,6 +239,7 @@ class EmbeatDatabase:
             self.collection_version = "v2"
             return
         return
+
 
     # Read json file data and keep in memory
     def read_json_files(self):

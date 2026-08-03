@@ -23,3 +23,5 @@ gensim
 ### web api server ###
 fastapi
 uvicorn
+python-dotenv
+
