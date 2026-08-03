@@ -14,7 +14,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # 先单独安装 CPU-only 版 PyTorch，避免默认拉取带 CUDA 的版本（体积节省约 3GB）
-RUN pip install --no-cache-dir torch>=2.6,<2.7 --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir "torch>=2.6,<2.7" --index-url https://download.pytorch.org/whl/cpu
 
 # 安装 Python 项目依赖（requirements.txt 中的 torch 行会被已安装版本满足，无需重装）
 RUN pip install --no-cache-dir -r requirements.txt
