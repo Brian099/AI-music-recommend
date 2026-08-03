@@ -1,0 +1,14 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.qdrant-initialized
+storage/
+qdrant_storage/
+测试音乐/
+qdrant.exe
+logs/
+.gemini/

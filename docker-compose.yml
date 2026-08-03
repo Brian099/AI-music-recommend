@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: embeat-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      # 直接挂载本地已有的数据库文件夹，实现向量库数据无缝继承
+      - ./storage:/qdrant/storage
+    restart: always
+
+  embeat-api:
+    build: .
+    container_name: embeat-api-service
+    ports:
+      - "8000:8000"
+    volumes:
+      # 挂载模型文件夹以读取 MLP 模型权重
+      - ./checkpoints:/app/checkpoints
+      # 挂载宿主机测试音乐文件夹到容器内的 /music，供离线提取与试听
+      - ./测试音乐:/music
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - MUSIC_DIR=/music
+    depends_on:
+      - qdrant
+    restart: always

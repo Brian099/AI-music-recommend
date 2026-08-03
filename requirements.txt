@@ -18,4 +18,6 @@ zhconv
 beautifulsoup4
 cloudscraper
 gensim
-python-dotenv
+### web api server ###
+fastapi
+uvicorn
