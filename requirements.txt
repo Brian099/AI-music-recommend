@@ -6,9 +6,11 @@ filelock
 datasets
 
 ### train ###
-#torch>=2.6,<2.7  # install manually, see README
+torch>=2.6,<2.7
 numpy<=1.26.4
 datasets
+librosa
+
 
 ### infer ###
 qdrant-client>=1.18.0,<1.19.0
