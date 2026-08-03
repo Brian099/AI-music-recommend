@@ -24,4 +24,5 @@ gensim
 fastapi
 uvicorn
 python-dotenv
+mutagen
 

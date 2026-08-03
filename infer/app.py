@@ -8,6 +8,7 @@ import uuid
 import re
 import torch
 import numpy as np
+from mutagen import File as MutagenFile
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -143,17 +144,35 @@ async def scan_music():
         if features is None:
             continue
 
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        parts = base_name.split(" - ", 1)
-        if len(parts) == 2:
-            # Check for leading song number prefix like '01. '
-            artist = parts[0].strip()
-            title = parts[1].strip()
-            # Clean up leading track number e.g. "01. 周杰伦" -> "周杰伦"
-            artist = re.sub(r'^\d+\.\s*', '', artist)
-        else:
-            artist = "Unknown Artist"
-            title = base_name.strip()
+        # --- 优先读取内嵌元数据标签，失败则回退到文件名解析 ---
+        title, artist = None, None
+        try:
+            audio = MutagenFile(file_path, easy=True)
+            if audio is not None:
+                # easy=True 统一了 MP3/FLAC/M4A/OGG 等格式的标签键名
+                title_tags = audio.get("title") or audio.get("TIT2") or []
+                artist_tags = audio.get("artist") or audio.get("TPE1") or []
+                if title_tags:
+                    title = str(title_tags[0]).strip() or None
+                if artist_tags:
+                    artist = str(artist_tags[0]).strip() or None
+        except Exception:
+            pass
+
+        # 回退：从文件名解析（格式："歌手 - 歌名" 或 "01. 歌手 - 歌名"）
+        if not title or not artist:
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            parts = base_name.split(" - ", 1)
+            if len(parts) == 2:
+                fb_artist = re.sub(r'^\d+\.\s*', '', parts[0].strip())
+                fb_title = parts[1].strip()
+            else:
+                fb_artist = "Unknown Artist"
+                fb_title = base_name.strip()
+            if not artist:
+                artist = fb_artist
+            if not title:
+                title = fb_title
 
         row = {
             "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, file_path)),
