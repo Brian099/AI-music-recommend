@@ -13,7 +13,7 @@ services:
     restart: always
 
   embeat-api:
-    build: .
+    image: brian9909/ai-music-recommend:latest
     container_name: embeat-api-service
     ports:
       - "8000:8000"
