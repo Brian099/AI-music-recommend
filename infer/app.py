@@ -56,6 +56,10 @@ async def list_songs():
     """Scrolls and lists all indexed songs from Qdrant database."""
     try:
         client = QdrantClient(url=QDRANT_URL)
+        # Return empty list if collection hasn't been created yet (fresh deployment)
+        if not client.collection_exists(COLLECTION_NAME):
+            client.close()
+            return []
         result, _ = client.scroll(
             collection_name=COLLECTION_NAME,
             limit=1000,
