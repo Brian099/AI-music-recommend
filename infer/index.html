@@ -695,6 +695,7 @@
         let songList = [];
         let recommendedTracks = [];
         let currentTrackIndex = -1;
+        let seedTrackInfo = null; // 当前种子歌曲信息
         
         const audio = document.getElementById("audio-player");
         const playPauseBtn = document.getElementById("btn-play-pause");
@@ -920,11 +921,20 @@
             const limit = document.getElementById("recommend-limit").value;
             const container = document.getElementById("results-container");
             const btn = document.getElementById("btn-recommend");
-            
+
             if (!seedId) {
                 alert("请先选择一首种子歌曲！");
                 return;
             }
+
+            // 提取种子歌曲的名称和歌手（从下拉框选中项文本）
+            const seedSelect = document.getElementById("seed-select");
+            const seedOption = seedSelect.options[seedSelect.selectedIndex];
+            const seedText = seedOption ? seedOption.textContent : "";
+            const seedParts = seedText.split(" - ");
+            const seedName = seedParts[0] || "";
+            const seedArtist = seedParts.length > 1 ? seedParts[1] : "";
+            seedTrackInfo = { track_id: seedId, track_name: seedName, artist_name: seedArtist };
 
             btn.disabled = true;
             btn.textContent = "正在计算特征与召回...";
@@ -961,10 +971,42 @@
             }
 
             container.innerHTML = "";
+
+            // === 在顶端渲染种子歌曲卡片 ===
+            if (seedTrackInfo) {
+                const seedCard = document.createElement("div");
+                seedCard.className = "track-card";
+                seedCard.style.borderLeft = "3px solid #b066ff";
+                seedCard.style.background = "rgba(138, 43, 226, 0.08)";
+
+                seedCard.innerHTML = `
+                    <div class="track-info-section">
+                        <button class="play-trigger-btn" onclick="playSeedTrack()">▶</button>
+                        <div class="track-meta">
+                            <div class="track-title">${seedTrackInfo.track_name}</div>
+                            <div class="track-artist">${seedTrackInfo.artist_name}</div>
+                            <div class="track-badges">
+                                <span class="badge" style="background: rgba(176, 102, 255, 0.2); border: 1px solid rgba(176, 102, 255, 0.4); color: #c38aff;">种子歌曲</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="score-section">
+                        <div class="score-label">
+                            <span class="score-val" style="color: #c38aff;">—</span>
+                            <div class="score-bar-bg">
+                                <div class="score-bar-fill" style="width: 100%; background: linear-gradient(90deg, #b066ff, #b066ff);"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(seedCard);
+            }
+
+            // === 渲染推荐结果 ===
             tracks.forEach((track, index) => {
                 const card = document.createElement("div");
                 card.className = "track-card";
-                
+
                 // 构建来源标签
                 let badgeHTML = "";
                 const sources = track.sources || [];
@@ -999,13 +1041,20 @@
                     </div>
                 `;
                 container.appendChild(card);
-                
+
                 // 动画触发宽度
                 setTimeout(() => {
                     const fillBar = document.getElementById(`bar-${index}`);
                     if (fillBar) fillBar.style.width = `${formattedScore}%`;
                 }, 100);
             });
+        }
+
+        // 播放种子歌曲
+        function playSeedTrack() {
+            if (!seedTrackInfo) return;
+            currentTrackIndex = -1;
+            playAudio(seedTrackInfo.track_id, seedTrackInfo.track_name, seedTrackInfo.artist_name);
         }
 
         // 从推荐列表播放特定曲目
@@ -1041,13 +1090,19 @@
         }
 
         function skipBackward() {
-            if (currentTrackIndex > 0) {
+            if (currentTrackIndex === 0) {
+                // 从推荐第一首跳回种子歌曲
+                playSeedTrack();
+            } else if (currentTrackIndex > 0) {
                 playSongAt(currentTrackIndex - 1);
             }
         }
 
         function skipForward() {
-            if (currentTrackIndex >= 0 && currentTrackIndex < recommendedTracks.length - 1) {
+            if (currentTrackIndex === -1) {
+                // 从种子歌曲跳到推荐第一首
+                playSongAt(0);
+            } else if (currentTrackIndex >= 0 && currentTrackIndex < recommendedTracks.length - 1) {
                 playSongAt(currentTrackIndex + 1);
             }
         }
