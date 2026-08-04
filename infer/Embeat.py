@@ -1076,87 +1076,112 @@ class EmbeatDatabase:
         result = self.shuffle_result_block(result=result, column_name="artist_name", max_block_len=2, max_tries=top_k)
         return result
 
-    # 从不同风格中随机抽取一首歌曲作为新种子
-    def get_random_track_exclude_style(self, track_id: str):
+    # 从不同声音特征中随机抽取一首歌曲作为新种子
+    def get_random_track_diff_sound(self, track_id: str):
         """
-        从与指定歌曲完全不同风格的曲库中随机返回一首歌曲的完整记录。
-        用于「换个风格」功能：先抽新种子，再基于新种子做推荐。
+        基于声音特征向量，从曲库中随机返回一首与原歌曲声学特征差异大的歌曲。
+        不依赖风格标签，纯粹基于 embedding 向量距离。
         """
-        # 1. 找到原歌曲
+        import random
+        import numpy as np
+        
+        # 1. 找到原歌曲及其向量
         query_record = self.find_query_record_by_track(track_id=track_id)
         if query_record is None:
-            print("get_random_track_exclude_style: Track not found.")
+            print("get_random_track_diff_sound: Track not found.")
             return None
 
         query_payload = query_record.payload or {}
-        query_artist_idx = int(query_payload.get("artist_idx") or 0)
-        query_artist_genre_idx = self.get_artist_genre_idx(query_payload=query_payload)
-        if query_artist_genre_idx == 0:
-            query_artist_genre_idx = int(self.artist_genre_idx_patch.get(query_artist_idx, 0))
-
-        if query_artist_genre_idx == 0:
-            print("get_random_track_exclude_style: Unknown genre, cannot exclude.")
+        query_vector = query_record.vector or None
+        
+        # 如果记录中没有向量，重新查询获取
+        if query_vector is None:
+            try:
+                rec = self.client.retrieve(
+                    collection_name=self.collection_name,
+                    ids=[query_record.id],
+                    with_vectors=True,
+                    with_payload=True
+                )
+                if rec and len(rec) > 0:
+                    query_vector = rec[0].vector
+                    query_payload = rec[0].payload or {}
+            except Exception as e:
+                print(f"get_random_track_diff_sound: Failed to retrieve vector: {e}")
+                return None
+        
+        if query_vector is None:
+            print("get_random_track_diff_sound: No vector available.")
             return None
-
-        # 2. 滚动获取所有不同风格的歌曲
-        candidates = []
+        
+        # 2. 使用反向向量（负向量）搜索距离最远的歌曲
+        # 在余弦相似度下，-query_vector 会返回与原歌曲最不相似的歌曲
+        neg_vector = [-v for v in query_vector]
+        
         try:
-            records, next_offset = self.client.scroll(
+            # 使用负向量查询，获取距离最远的 Top N 候选
+            far_tracks = self.client.query_points(
+                collection_name=self.collection_name,
+                query=neg_vector,
+                limit=100,
+                with_payload=True,
+                with_vectors=False
+            )
+            candidates = list(far_tracks.points)
+            
+            if self.verbose_log:
+                print(f"get_random_track_diff_sound: Found {len(candidates)} far tracks via negative vector")
+            
+            # 从距离最远的前 100 首中随机选一首
+            if candidates:
+                selected = random.choice(candidates[:50])  # 从前 50 首最远的中随机选
+                selected_payload = selected.payload or {}
+                
+                if self.verbose_log:
+                    print(f"get_random_track_diff_sound: Selected '{selected_payload.get('track_name')}' (score={selected.score:.3f})")
+                
+                payload = selected_payload
+                payload['track_id'] = str(payload.get('track_id') or '')
+                payload['track_name'] = str(payload.get('track_name') or '')
+                payload['artist_name'] = str(payload.get('artist_name') or '')
+                payload['artist_genre_idx'] = int(payload.get('artist_genre_idx') or 0)
+                return payload
+                
+        except Exception as e:
+            print(f"get_random_track_diff_sound: Failed to query with negative vector: {e}")
+        
+        # 3. 回退策略：随机从曲库中选一首（排除原歌曲）
+        if self.verbose_log:
+            print("get_random_track_diff_sound: Fallback to random scroll")
+        
+        try:
+            records, _ = self.client.scroll(
                 collection_name=self.collection_name,
                 scroll_filter=qdrant_models.Filter(
                     must_not=[
                         qdrant_models.FieldCondition(
-                            key="artist_genre_idx",
-                            match=qdrant_models.MatchValue(value=query_artist_genre_idx)
+                            key="track_id",
+                            match=qdrant_models.MatchValue(value=str(query_payload.get('track_id', '')))
                         )
                     ]
                 ),
-                limit=500,
+                limit=200,
                 with_payload=True,
                 with_vectors=False
             )
-            candidates = list(records)
-
-            # 如果不够多，继续滚动
-            while next_offset and len(candidates) < 100:
-                records, next_offset = self.client.scroll(
-                    collection_name=self.collection_name,
-                    scroll_filter=qdrant_models.Filter(
-                        must_not=[
-                            qdrant_models.FieldCondition(
-                                key="artist_genre_idx",
-                                match=qdrant_models.MatchValue(value=query_artist_genre_idx)
-                            )
-                        ]
-                    ),
-                    limit=500,
-                    offset=next_offset,
-                    with_payload=True,
-                    with_vectors=False
-                )
-                candidates.extend(list(records))
-
+            if records:
+                selected = random.choice(list(records))
+                selected_payload = selected.payload or {}
+                payload = selected_payload
+                payload['track_id'] = str(payload.get('track_id') or '')
+                payload['track_name'] = str(payload.get('track_name') or '')
+                payload['artist_name'] = str(payload.get('artist_name') or '')
+                payload['artist_genre_idx'] = int(payload.get('artist_genre_idx') or 0)
+                return payload
         except Exception as e:
-            print(f"get_random_track_exclude_style: Failed to scroll: {e}")
-            return None
-
-        if not candidates:
-            print("get_random_track_exclude_style: No candidates found with different genre.")
-            return None
-
-        # 3. 随机选一首
-        import random
-        selected = random.choice(candidates)
-        if self.verbose_log:
-            print(f"get_random_track_exclude_style: Selected random track '{selected.payload.get('track_name')}' (genre_idx != {query_artist_genre_idx})")
+            print(f"get_random_track_diff_sound: Fallback scroll failed: {e}")
         
-        # 返回 payload 格式，与 search_entry 输入一致
-        payload = selected.payload or {}
-        payload['track_id'] = str(payload.get('track_id') or '')
-        payload['track_name'] = str(payload.get('track_name') or '')
-        payload['artist_name'] = str(payload.get('artist_name') or '')
-        payload['artist_genre_idx'] = int(payload.get('artist_genre_idx') or 0)
-        return payload
+        return None
 
     # Main method
     def search_entry(self, track_id: str = "", track_name: str = "", artist_name: str = "", artist_idx: int = 0, top_k: int = 20, add_query_track: bool = False, exclude_style: bool = False):

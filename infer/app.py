@@ -361,10 +361,10 @@ async def recommend_songs(req: RecommendRequest):
     """Retrieves similar tracks for the requested seed track_id."""
     try:
         if req.exclude_style:
-            # 步骤 1: 随机抽取一首完全不同风格的歌曲作为新种子
-            new_seed = db.get_random_track_exclude_style(track_id=req.track_id)
+            # 步骤 1: 基于声音特征向量，随机抽取一首声学特征差异大的歌曲作为新种子
+            new_seed = db.get_random_track_diff_sound(track_id=req.track_id)
             if new_seed is None:
-                raise HTTPException(status_code=400, detail="无法找到不同风格的歌曲，请确认曲库中有足够多不同风格的音乐。")
+                raise HTTPException(status_code=400, detail="无法找到不同声音特征的歌曲，请确认曲库中有足够多的音乐。")
 
             # 步骤 2: 基于新种子做正常的相似推荐
             results = db.search_entry(track_id=new_seed['track_id'], top_k=req.top_k)
