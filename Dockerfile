@@ -1,7 +1,7 @@
 # 使用官方轻量 Python 运行环境作为基础镜像
 FROM python:3.12-slim
 
-# 安装系统依赖：ffmpeg 是 librosa 解码音频文件（mp3/flac等）所必需的底座
+# 安装系统依赖：ffmpeg 是 librosa/essentia 解码音频文件（mp3/flac等）所必需的底座
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     build-essential \
@@ -18,6 +18,10 @@ RUN pip install --no-cache-dir "torch>=2.6,<2.7" --index-url https://download.py
 
 # 安装 Python 项目依赖（requirements.txt 中的 torch 行会被已安装版本满足，无需重装）
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Linux 环境额外安装 Essentia（全曲高精度提取，仅 Linux 官方提供 wheel）
+# 自动作为主要后端；若安装失败则自动降级为 Librosa（30秒截取）
+RUN pip install --no-cache-dir essentia || echo "[Warning] Essentia install failed, Librosa will be used as fallback."
 
 # 拷贝代码和模型权重文件
 COPY . .
