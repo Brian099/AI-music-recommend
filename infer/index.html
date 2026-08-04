@@ -226,6 +226,59 @@
             white-space: pre-wrap;
         }
 
+        /* 扫描进度指示器 */
+        .scan-progress {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            padding: 14px;
+            margin-top: 15px;
+            margin-bottom: 12px;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .progress-phase {
+            font-weight: 600;
+            color: #c38aff;
+        }
+
+        .progress-stats {
+            color: var(--text-muted);
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .progress-bar-track {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill-scan {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--success));
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 10px var(--primary-glow);
+        }
+
+        .progress-footer {
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: monospace;
+            min-height: 14px;
+        }
+
         /* 右侧内容面板 */
         .content-panel {
             display: flex;
@@ -555,6 +608,16 @@
                     <input type="text" id="scan-path" value="/music" readonly>
                 </div>
                 <button class="btn" id="btn-scan" onclick="startLibraryScan()">⚡ 扫描本地音频并生成向量</button>
+                <div class="scan-progress" id="scan-progress" style="display: none;">
+                    <div class="progress-header">
+                        <span class="progress-phase" id="progress-phase">准备中...</span>
+                        <span class="progress-stats" id="progress-stats"></span>
+                    </div>
+                    <div class="progress-bar-track">
+                        <div class="progress-bar-fill-scan" id="scan-progress-fill"></div>
+                    </div>
+                    <div class="progress-footer" id="progress-eta"></div>
+                </div>
                 <div class="form-group" style="margin-top: 15px; margin-bottom: 0;">
                     <label>提取进度与运行日志</label>
                     <div class="console" id="log-console">等待扫描启动...</div>
@@ -688,33 +751,167 @@
             }
         }
 
-        // 触发本地文件扫描与入库
+        // 触发本地文件扫描与入库（流式 NDJSON 实时进度）
         async function startLibraryScan() {
             const btn = document.getElementById("btn-scan");
             const consoleDiv = document.getElementById("log-console");
+            const progressBox = document.getElementById("scan-progress");
+            const phaseEl = document.getElementById("progress-phase");
+            const statsEl = document.getElementById("progress-stats");
+            const fillEl = document.getElementById("scan-progress-fill");
+            const etaEl = document.getElementById("progress-eta");
+
             btn.disabled = true;
-            btn.textContent = "⚙️ 正在分析音频特征...";
+            btn.textContent = "⚙️ 扫描进行中...";
+            progressBox.style.display = "block";
+            fillEl.style.width = "0%";
+            phaseEl.textContent = "准备中...";
+            statsEl.textContent = "";
+            etaEl.textContent = "";
             consoleDiv.textContent = "-> 开始扫描挂载文件夹 /music ...\n";
 
             try {
                 const response = await fetch("/scan", { method: "POST" });
-                const result = await response.json();
-                if (response.ok) {
-                    consoleDiv.textContent += `-> 成功扫描！\n`;
-                    consoleDiv.textContent += `   - 扫描曲目数: ${result.scanned_files}\n`;
-                    consoleDiv.textContent += `   - 状态: ${result.message}\n`;
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                    // 重新刷新列表
-                    await fetchSongList();
-                } else {
-                    consoleDiv.textContent += `-> 扫描失败: ${result.detail || '未知错误'}\n`;
+
+                // 兼容非流式错误响应（如 FastAPI 抛出的非 NDJSON 错误）
+                const contentType = response.headers.get("content-type") || "";
+                if (!contentType.includes("x-ndjson") && !contentType.includes("text/plain")) {
+                    let errText = "未知错误";
+                    try { const errJson = await response.json(); errText = errJson.detail || JSON.stringify(errJson); }
+                    catch (_) { errText = await response.text().catch(() => errText); }
+                    consoleDiv.textContent += `-> 扫描失败: ${errText}\n`;
+                    phaseEl.textContent = "❌ 出错";
+                    return;
+                }
+
+                if (!response.body) {
+                    consoleDiv.textContent += `-> 错误: 浏览器不支持流式响应\n`;
+                    phaseEl.textContent = "❌ 不支持";
+                    return;
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // 按行切分（NDJSON 以 \n 分隔）
+                    let newlineIdx;
+                    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+                        const line = buffer.slice(0, newlineIdx).trim();
+                        buffer = buffer.slice(newlineIdx + 1);
+                        if (!line) continue;
+
+                        let msg;
+                        try { msg = JSON.parse(line); }
+                        catch (_) { continue; }
+
+                        handleScanMessage(msg, {
+                            phaseEl, statsEl, fillEl, etaEl, consoleDiv
+                        });
+                    }
+                }
+                // 处理缓冲区中可能残留的最后一行
+                const tail = buffer.trim();
+                if (tail) {
+                    try { handleScanMessage(JSON.parse(tail), { phaseEl, statsEl, fillEl, etaEl, consoleDiv }); }
+                    catch (_) {}
                 }
             } catch (err) {
                 consoleDiv.textContent += `-> 请求发生错误: ${err.message}\n`;
+                phaseEl.textContent = "❌ 网络错误";
             } finally {
                 btn.disabled = false;
                 btn.textContent = "⚡ 扫描本地音频并生成向量";
             }
+        }
+
+        // 处理单条 NDJSON 进度消息，更新对应 UI 元素
+        function handleScanMessage(msg, ui) {
+            const { phaseEl, statsEl, fillEl, etaEl, consoleDiv } = ui;
+
+            switch (msg.type) {
+                case "phase":
+                    if (msg.phase === "cleanup") {
+                        phaseEl.textContent = "🧹 清理失效条目";
+                        statsEl.textContent = `0 / ${msg.total}`;
+                        fillEl.style.width = "0%";
+                        etaEl.textContent = `共 ${msg.total} 个失效条目待清理`;
+                    } else if (msg.phase === "extract") {
+                        phaseEl.textContent = "🎵 提取音频特征";
+                        statsEl.textContent = `0 / ${msg.total}`;
+                        if (msg.cleaned > 0) {
+                            consoleDiv.textContent += `-> 已清理失效条目: ${msg.cleaned} 个\n`;
+                        }
+                        consoleDiv.textContent += `-> 开始提取 ${msg.total} 个新文件的特征...\n`;
+                    } else if (msg.phase === "embedding") {
+                        phaseEl.textContent = "🧠 生成向量并入库";
+                        statsEl.textContent = `${msg.count} 首`;
+                        fillEl.style.width = "100%";
+                        etaEl.textContent = "正在批量生成向量并写入 Qdrant...";
+                    }
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                    break;
+
+                case "cleanup_progress":
+                    statsEl.textContent = `${msg.current} / ${msg.total}`;
+                    fillEl.style.width = `${(msg.current / msg.total * 100).toFixed(1)}%`;
+                    etaEl.textContent = `已清理: ${msg.path}`;
+                    break;
+
+                case "progress":
+                    statsEl.textContent = `${msg.current} / ${msg.total} (${msg.percent}%)`;
+                    fillEl.style.width = `${msg.percent}%`;
+                    if (msg.eta_seconds && msg.eta_seconds > 0) {
+                        etaEl.textContent = `约还需 ${formatEta(msg.eta_seconds)}`;
+                    } else if (msg.status !== "processing") {
+                        etaEl.textContent = "";
+                    }
+                    if (msg.status === "processing") {
+                        consoleDiv.textContent += `-> [${msg.current}/${msg.total}] 处理中: ${msg.track_name}\n`;
+                    } else if (msg.status === "ok") {
+                        consoleDiv.textContent += `   ✓ ${msg.track_name} - ${msg.artist || ''}\n`;
+                    } else if (msg.status === "failed") {
+                        consoleDiv.textContent += `   ✗ 失败: ${msg.track_name}\n`;
+                    }
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                    break;
+
+                case "done":
+                    fillEl.style.width = "100%";
+                    phaseEl.textContent = "✅ 完成";
+                    etaEl.textContent = "";
+                    statsEl.textContent = "";
+                    consoleDiv.textContent += `\n-> 扫描完成！\n`;
+                    consoleDiv.textContent += `   - 扫描文件: ${msg.scanned_files}\n`;
+                    consoleDiv.textContent += `   - 新增入库: ${msg.newly_indexed}\n`;
+                    consoleDiv.textContent += `   - 清理失效: ${msg.cleaned}\n`;
+                    if (msg.failed && msg.failed > 0) {
+                        consoleDiv.textContent += `   - 处理失败: ${msg.failed}\n`;
+                    }
+                    consoleDiv.textContent += `   - 状态: ${msg.message}\n`;
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                    fetchSongList();
+                    break;
+
+                case "error":
+                    consoleDiv.textContent += `-> 错误: ${msg.message}\n`;
+                    phaseEl.textContent = "❌ 出错";
+                    etaEl.textContent = "";
+                    break;
+            }
+        }
+
+        // 把秒数格式化为 "X 分 Y 秒" 形式
+        function formatEta(seconds) {
+            if (seconds < 60) return `${seconds} 秒`;
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return `${m} 分 ${s} 秒`;
         }
 
         // 获取相似推荐
