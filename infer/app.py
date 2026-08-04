@@ -47,6 +47,7 @@ db = EmbeatDatabase(qdrant_url=QDRANT_URL, collection_name=COLLECTION_NAME, verb
 class RecommendRequest(BaseModel):
     track_id: str
     top_k: Optional[int] = 10
+    exclude_style: Optional[bool] = False
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -359,8 +360,33 @@ async def scan_music():
 async def recommend_songs(req: RecommendRequest):
     """Retrieves similar tracks for the requested seed track_id."""
     try:
-        results = db.search_entry(track_id=req.track_id, top_k=req.top_k)
-        return results
+        if req.exclude_style:
+            # 步骤 1: 随机抽取一首完全不同风格的歌曲作为新种子
+            new_seed = db.get_random_track_exclude_style(track_id=req.track_id)
+            if new_seed is None:
+                raise HTTPException(status_code=400, detail="无法找到不同风格的歌曲，请确认曲库中有足够多不同风格的音乐。")
+
+            # 步骤 2: 基于新种子做正常的相似推荐
+            results = db.search_entry(track_id=new_seed['track_id'], top_k=req.top_k)
+            return {
+                "mode": "diff_style",
+                "new_seed": {
+                    "track_id": new_seed['track_id'],
+                    "track_name": new_seed['track_name'],
+                    "artist_name": new_seed['artist_name'],
+                    "artist_genre_idx": new_seed['artist_genre_idx']
+                },
+                "recommendations": results
+            }
+        else:
+            # 正常推荐：直接基于原种子做相似检索
+            results = db.search_entry(track_id=req.track_id, top_k=req.top_k)
+            return {
+                "mode": "similar",
+                "recommendations": results
+            }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing recommendation: {str(e)}")
 

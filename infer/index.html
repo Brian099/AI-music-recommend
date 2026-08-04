@@ -641,7 +641,10 @@
                     <label>推荐相似曲目数量 (Top-K)</label>
                     <input type="number" id="recommend-limit" value="10" min="1" max="50">
                 </div>
-                <button class="btn" id="btn-recommend" onclick="getRecommendations()">🔍 搜索相似歌曲</button>
+                <div class="form-group" style="display: flex; gap: 10px;">
+                    <button class="btn" id="btn-recommend" onclick="getRecommendations(false)" style="flex: 1; background: linear-gradient(90deg, #8a2be2, #4b0082);">🔍 相似推荐</button>
+                    <button class="btn" id="btn-recommend-diff" onclick="getRecommendations(true)" style="flex: 1; background: linear-gradient(90deg, #ff8c00, #ff4500);">🎲 换个风格</button>
+                </div>
             </div>
         </div>
 
@@ -696,6 +699,7 @@
         let recommendedTracks = [];
         let currentTrackIndex = -1;
         let seedTrackInfo = null; // 当前种子歌曲信息
+        let isDiffStyleMode = false; // 是否为"换个风格"模式
         
         const audio = document.getElementById("audio-player");
         const playPauseBtn = document.getElementById("btn-play-pause");
@@ -916,11 +920,14 @@
         }
 
         // 获取相似推荐
-        async function getRecommendations() {
+        async function getRecommendations(excludeStyle = false) {
             const seedId = document.getElementById("seed-select").value;
             const limit = document.getElementById("recommend-limit").value;
             const container = document.getElementById("results-container");
-            const btn = document.getElementById("btn-recommend");
+            const btnId = excludeStyle ? "btn-recommend-diff" : "btn-recommend";
+            const btn = document.getElementById(btnId);
+            const otherBtnId = excludeStyle ? "btn-recommend" : "btn-recommend-diff";
+            const otherBtn = document.getElementById(otherBtnId);
 
             if (!seedId) {
                 alert("请先选择一首种子歌曲！");
@@ -935,20 +942,47 @@
             const seedName = seedParts[0] || "";
             const seedArtist = seedParts.length > 1 ? seedParts[1] : "";
             seedTrackInfo = { track_id: seedId, track_name: seedName, artist_name: seedArtist };
+            isDiffStyleMode = excludeStyle;
 
             btn.disabled = true;
-            btn.textContent = "正在计算特征与召回...";
-            container.innerHTML = `<div class="empty-state">正在计算相似向量并执行多路召回，请稍候...</div>`;
+            otherBtn.disabled = true;
+            btn.textContent = excludeStyle ? "正在生成不同风格..." : "正在计算特征与召回...";
+            container.innerHTML = `<div class="empty-state">正在${excludeStyle ? '为您寻找不同风格' : '计算相似向量并执行多路召回'}，请稍候...</div>`;
 
             try {
                 const response = await fetch("/recommend", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ track_id: seedId, top_k: parseInt(limit) })
+                    body: JSON.stringify({ track_id: seedId, top_k: parseInt(limit), exclude_style: excludeStyle })
                 });
                 
                 if (response.ok) {
-                    recommendedTracks = await response.json();
+                    const result = await response.json();
+                    
+                    // 适配新的响应格式
+                    // { mode: "similar"|"diff_style", new_seed?: {...}, recommendations: [...] }
+                    recommendedTracks = result.recommendations || result;
+                    
+                    // 如果是换个风格模式，更新种子歌曲为新抽到的 B
+                    if (result.mode === "diff_style" && result.new_seed) {
+                        seedTrackInfo = result.new_seed;
+                        // 同步更新下拉框选择为新种子
+                        const seedSelect = document.getElementById("seed-select");
+                        const newOption = Array.from(seedSelect.options).find(
+                            o => o.value === result.new_seed.track_id
+                        );
+                        if (newOption) {
+                            seedSelect.value = result.new_seed.track_id;
+                        } else {
+                            // 如果下拉框没有此选项，创建一个临时选项
+                            const tempOpt = document.createElement("option");
+                            tempOpt.value = result.new_seed.track_id;
+                            tempOpt.textContent = `${result.new_seed.track_name} - ${result.new_seed.artist_name}`;
+                            seedSelect.appendChild(tempOpt);
+                            seedSelect.value = result.new_seed.track_id;
+                        }
+                    }
+                    
                     renderRecommendations(recommendedTracks);
                 } else {
                     const errDetail = await response.json();
@@ -958,7 +992,9 @@
                 container.innerHTML = `<div class="empty-state" style="color: #ff4a4a;">网络连接失败: ${err.message}</div>`;
             } finally {
                 btn.disabled = false;
-                btn.textContent = "🔍 搜索相似歌曲";
+                otherBtn.disabled = false;
+                btn.textContent = excludeStyle ? "🎲 换个风格" : "🔍 相似推荐";
+                otherBtn.textContent = excludeStyle ? "🔍 相似推荐" : "🎲 换个风格";
             }
         }
 
@@ -976,8 +1012,18 @@
             if (seedTrackInfo) {
                 const seedCard = document.createElement("div");
                 seedCard.className = "track-card";
-                seedCard.style.borderLeft = "3px solid #b066ff";
-                seedCard.style.background = "rgba(138, 43, 226, 0.08)";
+                if (isDiffStyleMode) {
+                    seedCard.style.borderLeft = "3px solid #ff8c00";
+                    seedCard.style.background = "rgba(255, 140, 0, 0.08)";
+                } else {
+                    seedCard.style.borderLeft = "3px solid #b066ff";
+                    seedCard.style.background = "rgba(138, 43, 226, 0.08)";
+                }
+
+                const seedLabel = isDiffStyleMode ? "新种子 (不同风格)" : "种子歌曲";
+                const seedLabelStyle = isDiffStyleMode
+                    ? "background: rgba(255, 140, 0, 0.2); border: 1px solid rgba(255, 140, 0, 0.4); color: #ffb74d;"
+                    : "background: rgba(176, 102, 255, 0.2); border: 1px solid rgba(176, 102, 255, 0.4); color: #c38aff;";
 
                 seedCard.innerHTML = `
                     <div class="track-info-section">
@@ -986,7 +1032,7 @@
                             <div class="track-title">${seedTrackInfo.track_name}</div>
                             <div class="track-artist">${seedTrackInfo.artist_name}</div>
                             <div class="track-badges">
-                                <span class="badge" style="background: rgba(176, 102, 255, 0.2); border: 1px solid rgba(176, 102, 255, 0.4); color: #c38aff;">种子歌曲</span>
+                                <span class="badge" style="${seedLabelStyle}">${seedLabel}</span>
                             </div>
                         </div>
                     </div>

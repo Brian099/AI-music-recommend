@@ -1076,8 +1076,90 @@ class EmbeatDatabase:
         result = self.shuffle_result_block(result=result, column_name="artist_name", max_block_len=2, max_tries=top_k)
         return result
 
+    # 从不同风格中随机抽取一首歌曲作为新种子
+    def get_random_track_exclude_style(self, track_id: str):
+        """
+        从与指定歌曲完全不同风格的曲库中随机返回一首歌曲的完整记录。
+        用于「换个风格」功能：先抽新种子，再基于新种子做推荐。
+        """
+        # 1. 找到原歌曲
+        query_record = self.find_query_record_by_track(track_id=track_id)
+        if query_record is None:
+            print("get_random_track_exclude_style: Track not found.")
+            return None
+
+        query_payload = query_record.payload or {}
+        query_artist_idx = int(query_payload.get("artist_idx") or 0)
+        query_artist_genre_idx = self.get_artist_genre_idx(query_payload=query_payload)
+        if query_artist_genre_idx == 0:
+            query_artist_genre_idx = int(self.artist_genre_idx_patch.get(query_artist_idx, 0))
+
+        if query_artist_genre_idx == 0:
+            print("get_random_track_exclude_style: Unknown genre, cannot exclude.")
+            return None
+
+        # 2. 滚动获取所有不同风格的歌曲
+        candidates = []
+        try:
+            records, next_offset = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=qdrant_models.Filter(
+                    must_not=[
+                        qdrant_models.FieldCondition(
+                            key="artist_genre_idx",
+                            match=qdrant_models.MatchValue(value=query_artist_genre_idx)
+                        )
+                    ]
+                ),
+                limit=500,
+                with_payload=True,
+                with_vectors=False
+            )
+            candidates = list(records)
+
+            # 如果不够多，继续滚动
+            while next_offset and len(candidates) < 100:
+                records, next_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=qdrant_models.Filter(
+                        must_not=[
+                            qdrant_models.FieldCondition(
+                                key="artist_genre_idx",
+                                match=qdrant_models.MatchValue(value=query_artist_genre_idx)
+                            )
+                        ]
+                    ),
+                    limit=500,
+                    offset=next_offset,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                candidates.extend(list(records))
+
+        except Exception as e:
+            print(f"get_random_track_exclude_style: Failed to scroll: {e}")
+            return None
+
+        if not candidates:
+            print("get_random_track_exclude_style: No candidates found with different genre.")
+            return None
+
+        # 3. 随机选一首
+        import random
+        selected = random.choice(candidates)
+        if self.verbose_log:
+            print(f"get_random_track_exclude_style: Selected random track '{selected.payload.get('track_name')}' (genre_idx != {query_artist_genre_idx})")
+        
+        # 返回 payload 格式，与 search_entry 输入一致
+        payload = selected.payload or {}
+        payload['track_id'] = str(payload.get('track_id') or '')
+        payload['track_name'] = str(payload.get('track_name') or '')
+        payload['artist_name'] = str(payload.get('artist_name') or '')
+        payload['artist_genre_idx'] = int(payload.get('artist_genre_idx') or 0)
+        return payload
+
     # Main method
-    def search_entry(self, track_id: str = "", track_name: str = "", artist_name: str = "", artist_idx: int = 0, top_k: int = 20, add_query_track: bool = False):
+    def search_entry(self, track_id: str = "", track_name: str = "", artist_name: str = "", artist_idx: int = 0, top_k: int = 20, add_query_track: bool = False, exclude_style: bool = False):
         result = []
         artist_idx = max(0, artist_idx)
         if (not track_id) and (not track_name and not artist_name) and (not artist_idx) and (not artist_name):
@@ -1142,7 +1224,11 @@ class EmbeatDatabase:
             print(f"-> Find query record used time: {int((t2 - t1) * 1000)}ms")
         t1 = time.time()
         candidate_limit = max(1, min(int(top_k * 10), 512))
+        exclude_genre_idx = query_artist_genre_idx if exclude_style and query_artist_genre_idx > 0 else 0
         candidates = self.search_vector_similar_record(query_vector=query_vector, candidate_limit=candidate_limit, artist_genre_idx=artist_genre_idxs)
+        # 后置过滤：排除同风格候选（但保留声学相似度）
+        if exclude_genre_idx > 0:
+            candidates = [c for c in candidates if int(c.payload.get("artist_genre_idx", 0)) != exclude_genre_idx]
         result = self.filter_similar_candidates(query_payload=query_payload, candidates=candidates, top_k=top_k)
         t2 = time.time()
         if self.verbose_log:
@@ -1153,6 +1239,9 @@ class EmbeatDatabase:
             candidate_limit = max(1, min(int(top_k * 2), 128))
             track_genre_idx = self.get_track_genre_idx(query_payload=query_payload, candidates=candidates, fallback_idx=query_artist_genre_idx)
             popular_candidates = self.search_genre_popular_record(query_vector=query_vector, candidate_limit=candidate_limit, artist_genre_idx=track_genre_idx)
+            # 后置过滤热门候选中的同风格
+            if exclude_genre_idx > 0:
+                popular_candidates = [c for c in popular_candidates if int(c.payload.get("artist_genre_idx", 0)) != exclude_genre_idx]
             popular_result = self.filter_others_candidates(query_payload=query_payload, candidates=popular_candidates, top_k=top_k)
         t2 = time.time()
         if self.verbose_log:
