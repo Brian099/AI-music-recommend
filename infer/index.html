@@ -215,6 +215,24 @@
             box-shadow: none;
         }
 
+        .stop-btn {
+            background: rgba(255, 75, 75, 0.15);
+            border: 1px solid rgba(255, 75, 75, 0.4);
+            color: #ff6b6b;
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 600;
+        }
+
+        .stop-btn:hover {
+            background: rgba(255, 75, 75, 0.35);
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(255, 75, 75, 0.4);
+        }
+
         /* 扫描日志台 */
         .console {
             background: rgba(0, 0, 0, 0.5);
@@ -659,11 +677,21 @@
                     <label>曲库扫描路径 (容器内)</label>
                     <input type="text" id="scan-path" value="/music" readonly>
                 </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>并行提取线程数 (Max: <span id="cpu-max-workers">3</span> 核心)</label>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <input type="number" id="scan-workers" value="2" min="1" max="3" style="width: 90px; padding: 6px 10px; background: rgba(0, 0, 0, 0.4); border: 1px solid var(--glass-border); border-radius: 6px; color: #fff; font-size: 13px;">
+                        <span style="font-size: 11px; color: var(--text-muted);" id="cpu-total-hint">预留 1 核防卡死</span>
+                    </div>
+                </div>
                 <button class="btn" id="btn-scan" onclick="startLibraryScan()">⚡ 扫描本地音频并生成向量</button>
                 <div class="scan-progress" id="scan-progress" style="display: none;">
-                    <div class="progress-header">
-                        <span class="progress-phase" id="progress-phase">准备中...</span>
-                        <span class="progress-stats" id="progress-stats"></span>
+                    <div class="progress-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span class="progress-phase" id="progress-phase">准备中...</span>
+                            <span class="progress-stats" id="progress-stats"></span>
+                        </div>
+                        <button class="stop-btn" id="btn-stop-scan" onclick="stopLibraryScan()" style="display: none;">🛑 中止扫描</button>
                     </div>
                     <div class="progress-bar-track">
                         <div class="progress-bar-fill-scan" id="scan-progress-fill"></div>
@@ -764,7 +792,88 @@
         window.addEventListener("DOMContentLoaded", () => {
             fetchSongList();
             setupAudioEventListeners();
+            checkScanStatusOnLoad();
         });
+
+        // 页面打开/刷新时，检查后端是否有正在运行的扫描任务与历史日志
+        async function checkScanStatusOnLoad() {
+            try {
+                const res = await fetch("/scan/status");
+                if (!res.ok) return;
+                const data = await res.json();
+
+                if (data.cpu_info) {
+                    const maxW = data.cpu_info.max_workers || 1;
+                    const totalC = data.cpu_info.total_cpus || 4;
+                    const workersInput = document.getElementById("scan-workers");
+                    const maxHint = document.getElementById("cpu-max-workers");
+                    const totalHint = document.getElementById("cpu-total-hint");
+                    if (workersInput) {
+                        workersInput.max = maxW;
+                        if (!workersInput.value || parseInt(workersInput.value) > maxW) {
+                            workersInput.value = maxW;
+                        }
+                    }
+                    if (maxHint) maxHint.textContent = maxW;
+                    if (totalHint) totalHint.textContent = `预留 1 核防卡死 (总核心数: ${totalC})`;
+                }
+
+                const consoleDiv = document.getElementById("log-console");
+                if (data.logs && data.logs.length > 0) {
+                    consoleDiv.textContent = data.logs.join("\n") + "\n";
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                }
+
+                if (data.is_running) {
+                    const btn = document.getElementById("btn-scan");
+                    const progressBox = document.getElementById("scan-progress");
+                    const stopBtn = document.getElementById("btn-stop-scan");
+                    const phaseEl = document.getElementById("progress-phase");
+                    const statsEl = document.getElementById("progress-stats");
+                    const fillEl = document.getElementById("scan-progress-fill");
+
+                    btn.disabled = true;
+                    btn.textContent = "⚙️ 后台扫描进行中...";
+                    progressBox.style.display = "block";
+                    if (stopBtn) {
+                        stopBtn.style.display = "inline-block";
+                        stopBtn.disabled = false;
+                        stopBtn.textContent = "🛑 中止扫描";
+                    }
+
+                    const s = data.status || {};
+                    fillEl.style.width = `${s.percent || 0}%`;
+                    statsEl.textContent = s.total ? `${s.current || 0} / ${s.total} (${s.percent || 0}%)` : '';
+                    if (s.phase === 'extract') phaseEl.textContent = '🎵 提取音频特征';
+                    else if (s.phase === 'cleanup') phaseEl.textContent = '🧹 清理失效条目';
+                    else if (s.phase === 'embedding') phaseEl.textContent = '🧠 生成向量并入库';
+                    else phaseEl.textContent = '⚙️ 后台处理中...';
+
+                    // 重新连接流式日志
+                    startLibraryScan(true);
+                }
+            } catch (err) {
+                console.error("Failed to check scan status on load:", err);
+            }
+        }
+
+        // 中途中止后台特征提取任务
+        async function stopLibraryScan() {
+            const stopBtn = document.getElementById("btn-stop-scan");
+            if (stopBtn) {
+                stopBtn.disabled = true;
+                stopBtn.textContent = "⏳ 正在发送中止信号...";
+            }
+            try {
+                const res = await fetch("/scan/stop", { method: "POST" });
+                const data = await res.json();
+                const consoleDiv = document.getElementById("log-console");
+                consoleDiv.textContent += `-> ${data.message || '已请求中止'}\n`;
+                consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            } catch (err) {
+                console.error("Failed to stop scan:", err);
+            }
+        }
 
         // 获取歌曲列表
         async function fetchSongList() {
@@ -809,7 +918,7 @@
         }
 
         // 触发本地文件扫描与入库（流式 NDJSON 实时进度）
-        async function startLibraryScan() {
+        async function startLibraryScan(isResume = false) {
             const btn = document.getElementById("btn-scan");
             const consoleDiv = document.getElementById("log-console");
             const progressBox = document.getElementById("scan-progress");
@@ -817,18 +926,29 @@
             const statsEl = document.getElementById("progress-stats");
             const fillEl = document.getElementById("scan-progress-fill");
             const etaEl = document.getElementById("progress-eta");
+            const stopBtn = document.getElementById("btn-stop-scan");
+            const workersInput = document.getElementById("scan-workers");
+            const workers = workersInput ? parseInt(workersInput.value) || 1 : 1;
 
             btn.disabled = true;
             btn.textContent = "⚙️ 扫描进行中...";
             progressBox.style.display = "block";
-            fillEl.style.width = "0%";
-            phaseEl.textContent = "准备中...";
-            statsEl.textContent = "";
-            etaEl.textContent = "";
-            consoleDiv.textContent = "-> 开始扫描挂载文件夹 /music ...\n";
+            if (stopBtn) {
+                stopBtn.style.display = "inline-block";
+                stopBtn.disabled = false;
+                stopBtn.textContent = "🛑 中止扫描";
+            }
+
+            if (!isResume) {
+                fillEl.style.width = "0%";
+                phaseEl.textContent = "准备中...";
+                statsEl.textContent = "";
+                etaEl.textContent = "";
+                consoleDiv.textContent = `-> 发起后台扫描任务 (线程数: ${workers})...\n`;
+            }
 
             try {
-                const response = await fetch("/scan", { method: "POST" });
+                const response = await fetch(`/scan?workers=${workers}`, { method: "POST" });
 
                 // 兼容非流式错误响应（如 FastAPI 抛出的非 NDJSON 错误）
                 const contentType = response.headers.get("content-type") || "";
@@ -836,8 +956,8 @@
                     let errText = "未知错误";
                     try { const errJson = await response.json(); errText = errJson.detail || JSON.stringify(errJson); }
                     catch (_) { errText = await response.text().catch(() => errText); }
-                    consoleDiv.textContent += `-> 扫描失败: ${errText}\n`;
-                    phaseEl.textContent = "❌ 出错";
+                    consoleDiv.textContent += `-> 扫描提示: ${errText}\n`;
+                    phaseEl.textContent = "❌ 提示";
                     return;
                 }
 
@@ -868,28 +988,28 @@
                         catch (_) { continue; }
 
                         handleScanMessage(msg, {
-                            phaseEl, statsEl, fillEl, etaEl, consoleDiv
+                            phaseEl, statsEl, fillEl, etaEl, consoleDiv, stopBtn
                         });
                     }
                 }
                 // 处理缓冲区中可能残留的最后一行
                 const tail = buffer.trim();
                 if (tail) {
-                    try { handleScanMessage(JSON.parse(tail), { phaseEl, statsEl, fillEl, etaEl, consoleDiv }); }
+                    try { handleScanMessage(JSON.parse(tail), { phaseEl, statsEl, fillEl, etaEl, consoleDiv, stopBtn }); }
                     catch (_) {}
                 }
             } catch (err) {
-                consoleDiv.textContent += `-> 请求发生错误: ${err.message}\n`;
-                phaseEl.textContent = "❌ 网络错误";
+                consoleDiv.textContent += `-> 实时数据流读取完成或重连: ${err.message}\n`;
             } finally {
                 btn.disabled = false;
                 btn.textContent = "⚡ 扫描本地音频并生成向量";
+                if (stopBtn) stopBtn.style.display = "none";
             }
         }
 
         // 处理单条 NDJSON 进度消息，更新对应 UI 元素
         function handleScanMessage(msg, ui) {
-            const { phaseEl, statsEl, fillEl, etaEl, consoleDiv } = ui;
+            const { phaseEl, statsEl, fillEl, etaEl, consoleDiv, stopBtn } = ui;
 
             switch (msg.type) {
                 case "phase":
@@ -952,6 +1072,18 @@
                     }
                     consoleDiv.textContent += `   - 状态: ${msg.message}\n`;
                     consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                    if (stopBtn) stopBtn.style.display = "none";
+                    fetchSongList();
+                    break;
+
+                case "aborted":
+                    fillEl.style.width = "0%";
+                    phaseEl.textContent = "🛑 已中止";
+                    etaEl.textContent = "";
+                    statsEl.textContent = "";
+                    consoleDiv.textContent += `\n🛑 特征提取已被用户中途中止。\n`;
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                    if (stopBtn) stopBtn.style.display = "none";
                     fetchSongList();
                     break;
 
@@ -959,6 +1091,7 @@
                     consoleDiv.textContent += `-> 错误: ${msg.message}\n`;
                     phaseEl.textContent = "❌ 出错";
                     etaEl.textContent = "";
+                    if (stopBtn) stopBtn.style.display = "none";
                     break;
             }
         }

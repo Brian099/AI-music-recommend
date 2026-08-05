@@ -8,11 +8,12 @@ import uuid
 import re
 import json
 import time
+import asyncio
 import torch
 import numpy as np
 from mutagen import File as MutagenFile
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request, Header, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -90,20 +91,160 @@ async def list_songs():
         raise HTTPException(status_code=500, detail=f"Failed to fetch songs from Qdrant: {str(e)}")
 
 
-@app.post("/scan")
-async def scan_music():
-    """
-    流式扫描 /music 文件夹：清理失效条目 → 提取新文件特征 → 生成向量 → 入库。
-    通过 NDJSON 流推送实时进度（百分比、ETA、逐文件状态）。
-    """
-    if not os.path.exists(MUSIC_DIR):
-        return StreamingResponse(
-            iter([_ndjson({"type": "error", "message": f"Music folder '{MUSIC_DIR}' does not exist inside container."})]),
-            media_type="application/x-ndjson"
-        )
+STATUS_FILE_PATH = os.path.join(project_root, "data", "scan_status.json")
 
-    async def event_stream():
-        # === 阶段 1: 扫描本地音频文件 ===
+
+class ScanTaskManager:
+    def __init__(self):
+        self.is_running = False
+        self.cancel_requested = False
+        self.task: Optional[asyncio.Task] = None
+        self.listeners: list[asyncio.Queue] = []
+        self.status = {
+            "is_running": False,
+            "phase": "idle",
+            "current": 0,
+            "total": 0,
+            "percent": 0.0,
+            "eta_seconds": 0,
+            "cleaned": 0,
+            "failed": 0,
+            "scanned_files": 0,
+            "newly_indexed": 0,
+            "message": "",
+            "last_updated": 0.0
+        }
+        self.logs: list[str] = []
+        self.load_from_disk()
+
+    def load_from_disk(self):
+        try:
+            if os.path.exists(STATUS_FILE_PATH):
+                with open(STATUS_FILE_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.status = data.get("status", self.status)
+                    self.status["is_running"] = False
+                    self.logs = data.get("logs", [])[-200:]
+        except Exception as e:
+            print(f"[ScanManager] Failed to load status from disk: {e}")
+
+    def save_to_disk(self):
+        try:
+            os.makedirs(os.path.dirname(STATUS_FILE_PATH), exist_ok=True)
+            with open(STATUS_FILE_PATH, "w", encoding="utf-8") as f:
+                json.dump({
+                    "status": self.status,
+                    "logs": self.logs[-200:]
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[ScanManager] Failed to save status to disk: {e}")
+
+    def add_log(self, text: str):
+        self.logs.append(text)
+        if len(self.logs) > 300:
+            self.logs = self.logs[-200:]
+
+    async def broadcast(self, event: dict):
+        event_type = event.get("type")
+        if event_type == "phase":
+            self.status["phase"] = event.get("phase", "")
+            if event.get("phase") == "cleanup":
+                self.add_log(f"-> 阶段: 清理失效条目 (共 {event.get('total', 0)} 个)")
+            elif event.get("phase") == "extract":
+                self.add_log(f"-> 阶段: 提取音频特征 (共 {event.get('total', 0)} 个新文件)")
+            elif event.get("phase") == "embedding":
+                self.add_log(f"-> 阶段: 批量生成向量并入库 ({event.get('count', 0)} 首)")
+        elif event_type == "progress":
+            self.status["current"] = event.get("current", 0)
+            self.status["total"] = event.get("total", 0)
+            self.status["percent"] = event.get("percent", 0.0)
+            self.status["eta_seconds"] = event.get("eta_seconds", 0)
+            track_name = event.get("track_name", "")
+            status_str = event.get("status", "")
+            if status_str == "processing":
+                self.add_log(f"-> [{event.get('current')}/{event.get('total')}] 处理中: {track_name}")
+            elif status_str == "ok":
+                artist = event.get("artist", "")
+                self.add_log(f"   ✓ {track_name} - {artist or '未知歌手'}")
+            elif status_str == "failed":
+                self.add_log(f"   ✗ 失败: {track_name}")
+        elif event_type == "cleanup_progress":
+            self.add_log(f"   🧹 清理失效条目: {event.get('path', '')}")
+        elif event_type == "done":
+            self.status["is_running"] = False
+            self.status["phase"] = "done"
+            self.status["scanned_files"] = event.get("scanned_files", 0)
+            self.status["newly_indexed"] = event.get("newly_indexed", 0)
+            self.status["cleaned"] = event.get("cleaned", 0)
+            self.status["failed"] = event.get("failed", 0)
+            self.status["message"] = event.get("message", "")
+            self.add_log(f"\n-> 扫描完成: {event.get('message', '')}")
+            self.add_log(f"   - 扫描文件: {event.get('scanned_files', 0)}, 新增入库: {event.get('newly_indexed', 0)}, 清理失效: {event.get('cleaned', 0)}, 失败: {event.get('failed', 0)}")
+        elif event_type == "aborted":
+            self.status["is_running"] = False
+            self.status["phase"] = "aborted"
+            self.status["message"] = "扫描已被用户手动中止。"
+            self.add_log(f"\n🛑 扫描任务已被用户手动中止。")
+        elif event_type == "error":
+            self.status["is_running"] = False
+            self.status["phase"] = "error"
+            self.status["message"] = event.get("message", "")
+            self.add_log(f"\n❌ 出错: {event.get('message', '')}")
+
+        self.status["last_updated"] = time.time()
+        self.save_to_disk()
+
+        line = _ndjson(event)
+        to_remove = []
+        for q in self.listeners:
+            try:
+                q.put_nowait(line)
+            except Exception:
+                to_remove.append(q)
+        for q in to_remove:
+            if q in self.listeners:
+                self.listeners.remove(q)
+
+
+scan_manager = ScanTaskManager()
+
+
+def get_cpu_info():
+    """检测容器/系统可用的逻辑 CPU 线程数并计算最大安全并行线程数 (总线程 - 1)。"""
+    total_cpus = 4
+    try:
+        if os.path.exists("/sys/fs/cgroup/cpu.max"):
+            with open("/sys/fs/cgroup/cpu.max", "r") as f:
+                quota, period = f.read().strip().split()
+                if quota != "max":
+                    total_cpus = max(1, int(int(quota) / int(period)))
+                else:
+                    total_cpus = len(os.sched_getaffinity(0))
+        elif hasattr(os, "sched_getaffinity"):
+            total_cpus = len(os.sched_getaffinity(0))
+        else:
+            total_cpus = os.cpu_count() or 4
+    except Exception:
+        total_cpus = os.cpu_count() or 4
+
+    return {
+        "total_cpus": total_cpus,
+        "max_workers": max(1, total_cpus - 1)
+    }
+
+
+async def _run_scan_background(workers: int = 1):
+    scan_manager.is_running = True
+    scan_manager.cancel_requested = False
+    scan_manager.status["is_running"] = True
+    scan_manager.status["phase"] = "starting"
+    scan_manager.add_log(f"-> 开始扫描挂载文件夹 /music (并行线程数: {workers}) ...")
+
+    try:
+        if not os.path.exists(MUSIC_DIR):
+            await scan_manager.broadcast({"type": "error", "message": f"Music folder '{MUSIC_DIR}' does not exist inside container."})
+            return
+
         audio_files = []
         for root, dirs, files in os.walk(MUSIC_DIR):
             for file in files:
@@ -111,7 +252,7 @@ async def scan_music():
                     audio_files.append(os.path.join(root, file))
 
         if not audio_files:
-            yield _ndjson({
+            await scan_manager.broadcast({
                 "type": "done",
                 "scanned_files": 0,
                 "newly_indexed": 0,
@@ -121,9 +262,8 @@ async def scan_music():
             })
             return
 
-        # === 阶段 2: 滚动 Qdrant 已有条目，构建 path -> point_id 映射 ===
         client = QdrantClient(url=QDRANT_URL)
-        existing_paths = {}  # abs_path -> point_id
+        existing_paths = {}
         try:
             if client.collection_exists(COLLECTION_NAME):
                 result, _ = client.scroll(
@@ -139,7 +279,6 @@ async def scan_music():
         except Exception as e:
             print(f"Warning: Failed to scroll existing paths: {e}")
 
-        # === 阶段 3: 识别并清理失效条目（磁盘文件已被删除的） ===
         paths_to_delete = [
             (abs_path, point_id)
             for abs_path, point_id in existing_paths.items()
@@ -148,25 +287,28 @@ async def scan_music():
 
         cleaned_count = 0
         if paths_to_delete:
-            yield _ndjson({
+            await scan_manager.broadcast({
                 "type": "phase",
                 "phase": "cleanup",
                 "total": len(paths_to_delete)
             })
             for i, (abs_path, point_id) in enumerate(paths_to_delete, 1):
+                if scan_manager.cancel_requested:
+                    client.close()
+                    await scan_manager.broadcast({"type": "aborted"})
+                    return
                 try:
                     client.delete(collection_name=COLLECTION_NAME, points_selector=[point_id])
                     cleaned_count += 1
                 except Exception as e:
                     print(f"Failed to delete point {point_id}: {e}")
-                yield _ndjson({
+                await scan_manager.broadcast({
                     "type": "cleanup_progress",
                     "current": i,
                     "total": len(paths_to_delete),
                     "path": os.path.basename(abs_path)
                 })
 
-        # === 阶段 4: 过滤出待处理的新文件 ===
         files_to_process = [
             f for f in audio_files
             if os.path.abspath(f) not in existing_paths
@@ -174,7 +316,7 @@ async def scan_music():
 
         if not files_to_process:
             client.close()
-            yield _ndjson({
+            await scan_manager.broadcast({
                 "type": "done",
                 "scanned_files": len(audio_files),
                 "newly_indexed": 0,
@@ -184,17 +326,15 @@ async def scan_music():
             })
             return
 
-        # === 阶段 5: 加载 MLP 模型并流式提取特征 ===
         checkpoint_path = os.path.join(project_root, "checkpoints/EmbeatMLP/model.pt")
         if not os.path.exists(checkpoint_path):
             client.close()
-            yield _ndjson({"type": "error", "message": "Pre-trained MLP model weights not found."})
+            await scan_manager.broadcast({"type": "error", "message": "Pre-trained MLP model weights not found."})
             return
 
         model = load_model(checkpoint_path=checkpoint_path, device="cpu")
-
         total_to_process = len(files_to_process)
-        yield _ndjson({
+        await scan_manager.broadcast({
             "type": "phase",
             "phase": "extract",
             "total": total_to_process,
@@ -204,94 +344,108 @@ async def scan_music():
         songs_rows = []
         failed_files = []
         extract_start = time.time()
+        completed_count = 0
+        sem = asyncio.Semaphore(workers)
 
-        for idx, file_path in enumerate(files_to_process, 1):
-            # 推送"开始处理"进度（含 ETA 估算）
-            elapsed = time.time() - extract_start
-            eta_seconds = int((elapsed / (idx - 1)) * (total_to_process - idx + 1)) if idx > 1 else 0
-            yield _ndjson({
-                "type": "progress",
-                "current": idx,
-                "total": total_to_process,
-                "percent": round((idx - 1) * 100 / total_to_process, 1),
-                "eta_seconds": eta_seconds,
-                "track_name": os.path.splitext(os.path.basename(file_path))[0],
-                "status": "processing"
-            })
+        async def process_file(file_path):
+            nonlocal completed_count
+            async with sem:
+                if scan_manager.cancel_requested:
+                    return
 
-            features = extract_audio_features(file_path)
-            if features is None:
-                failed_files.append(file_path)
-                yield _ndjson({
+                track_basename = os.path.splitext(os.path.basename(file_path))[0]
+                await scan_manager.broadcast({
                     "type": "progress",
-                    "current": idx,
+                    "current": completed_count + 1,
                     "total": total_to_process,
-                    "percent": round(idx * 100 / total_to_process, 1),
-                    "status": "failed",
-                    "track_name": os.path.basename(file_path)
+                    "percent": round(completed_count * 100 / total_to_process, 1),
+                    "track_name": track_basename,
+                    "status": "processing"
                 })
-                continue
 
-            # --- 优先读取内嵌元数据标签，失败则回退到文件名解析 ---
-            title, artist = None, None
-            try:
-                audio = MutagenFile(file_path, easy=True)
-                if audio is not None:
-                    # easy=True 统一了 MP3/FLAC/M4A/OGG 等格式的标签键名
-                    title_tags = audio.get("title") or audio.get("TIT2") or []
-                    artist_tags = audio.get("artist") or audio.get("TPE1") or []
-                    if title_tags:
-                        title = str(title_tags[0]).strip() or None
-                    if artist_tags:
-                        artist = str(artist_tags[0]).strip() or None
-            except Exception:
-                pass
+                features = await asyncio.to_thread(extract_audio_features, file_path)
+                if features is None or scan_manager.cancel_requested:
+                    completed_count += 1
+                    if features is None:
+                        failed_files.append(file_path)
+                        await scan_manager.broadcast({
+                            "type": "progress",
+                            "current": completed_count,
+                            "total": total_to_process,
+                            "percent": round(completed_count * 100 / total_to_process, 1),
+                            "status": "failed",
+                            "track_name": track_basename
+                        })
+                    return
 
-            # 回退：从文件名解析（格式："歌手 - 歌名" 或 "01. 歌手 - 歌名"）
-            if not title or not artist:
-                base_name = os.path.splitext(os.path.basename(file_path))[0]
-                parts = base_name.split(" - ", 1)
-                if len(parts) == 2:
-                    fb_artist = re.sub(r'^\d+\.\s*', '', parts[0].strip())
-                    fb_title = parts[1].strip()
-                else:
-                    fb_artist = "Unknown Artist"
-                    fb_title = base_name.strip()
-                if not artist:
-                    artist = fb_artist
-                if not title:
-                    title = fb_title
+                title, artist = None, None
+                try:
+                    audio = MutagenFile(file_path, easy=True)
+                    if audio is not None:
+                        title_tags = audio.get("title") or audio.get("TIT2") or []
+                        artist_tags = audio.get("artist") or audio.get("TPE1") or []
+                        if title_tags:
+                            title = str(title_tags[0]).strip() or None
+                        if artist_tags:
+                            artist = str(artist_tags[0]).strip() or None
+                except Exception:
+                    pass
 
-            row = {
-                "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, file_path)),
-                "track_name": title,
-                "artist_name": artist,
-                "artist_idx": abs(hash(artist)) % 1000 + 1,
-                "artist_genres": "pop",
-                "artist_genre_idx": 1,
-                "related_artist_idxs": [],
-                "album_name": "Local Audio",
-                "isrc": f"LOCAL_{abs(hash(file_path)) % 1000000}",
-                "popularity": 0.5,
-                "local_path": file_path,
-                **features
-            }
-            songs_rows.append(row)
+                if not title or not artist:
+                    parts = track_basename.split(" - ", 1)
+                    if len(parts) == 2:
+                        fb_artist = re.sub(r'^\d+\.\s*', '', parts[0].strip())
+                        fb_title = parts[1].strip()
+                    else:
+                        fb_artist = "Unknown Artist"
+                        fb_title = track_basename.strip()
+                    if not artist:
+                        artist = fb_artist
+                    if not title:
+                        title = fb_title
 
-            yield _ndjson({
-                "type": "progress",
-                "current": idx,
-                "total": total_to_process,
-                "percent": round(idx * 100 / total_to_process, 1),
-                "status": "ok",
-                "track_name": title,
-                "artist": artist
-            })
+                row = {
+                    "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, file_path)),
+                    "track_name": title,
+                    "artist_name": artist,
+                    "artist_idx": abs(hash(artist)) % 1000 + 1,
+                    "artist_genres": "pop",
+                    "artist_genre_idx": 1,
+                    "related_artist_idxs": [],
+                    "album_name": "Local Audio",
+                    "isrc": f"LOCAL_{abs(hash(file_path)) % 1000000}",
+                    "popularity": 0.5,
+                    "local_path": file_path,
+                    **features
+                }
+                songs_rows.append(row)
+                completed_count += 1
 
-        # === 阶段 6: 批量生成嵌入向量 ===
+                elapsed = time.time() - extract_start
+                eta_seconds = int((elapsed / completed_count) * (total_to_process - completed_count)) if completed_count > 0 else 0
+                await scan_manager.broadcast({
+                    "type": "progress",
+                    "current": completed_count,
+                    "total": total_to_process,
+                    "percent": round(completed_count * 100 / total_to_process, 1),
+                    "eta_seconds": eta_seconds,
+                    "status": "ok",
+                    "track_name": title,
+                    "artist": artist
+                })
+
+        # 多核心并发执行
+        tasks = [asyncio.create_task(process_file(fp)) for fp in files_to_process]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        if scan_manager.cancel_requested:
+            client.close()
+            await scan_manager.broadcast({"type": "aborted"})
+            return
+
         if not songs_rows:
             client.close()
-            yield _ndjson({
+            await scan_manager.broadcast({
                 "type": "done",
                 "scanned_files": len(audio_files),
                 "newly_indexed": 0,
@@ -301,14 +455,13 @@ async def scan_music():
             })
             return
 
-        yield _ndjson({"type": "phase", "phase": "embedding", "count": len(songs_rows)})
+        await scan_manager.broadcast({"type": "phase", "phase": "embedding", "count": len(songs_rows)})
 
         device = next(model.parameters()).device
         computed_features = build_features(samples=songs_rows, torch_device=device)
         with torch.no_grad():
             embeddings = model(computed_features).cpu().numpy()
 
-        # === 阶段 7: 创建集合（如不存在）并 upsert ===
         if not client.collection_exists(COLLECTION_NAME):
             client.create_collection(
                 collection_name=COLLECTION_NAME,
@@ -344,7 +497,7 @@ async def scan_music():
         client.upsert(collection_name=COLLECTION_NAME, points=points)
         client.close()
 
-        yield _ndjson({
+        await scan_manager.broadcast({
             "type": "done",
             "scanned_files": len(audio_files),
             "newly_indexed": len(songs_rows),
@@ -352,8 +505,65 @@ async def scan_music():
             "failed": len(failed_files),
             "message": "Scan completed and Qdrant database updated successfully."
         })
+    except Exception as e:
+        print(f"[ScanTask] Error in background scan: {e}")
+        await scan_manager.broadcast({"type": "error", "message": f"Background scan error: {str(e)}"})
+    finally:
+        scan_manager.is_running = False
+        scan_manager.status["is_running"] = False
+        scan_manager.save_to_disk()
 
-    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+@app.post("/scan")
+async def scan_music(workers: Optional[int] = Query(None)):
+    """
+    启动或拉取后台音频特征提取任务的进度流 (NDJSON)。
+    接受 workers 参数控制并行线程数，硬上限为 CPU总核心数 - 1。
+    """
+    if not scan_manager.is_running:
+        cpu = get_cpu_info()
+        max_allowed = cpu["max_workers"]
+        actual_workers = max(1, min(workers or max_allowed, max_allowed))
+        scan_manager.logs.clear()
+        scan_manager.task = asyncio.create_task(_run_scan_background(workers=actual_workers))
+
+    q = asyncio.Queue()
+    scan_manager.listeners.append(q)
+
+    async def stream_generator():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(q.get(), timeout=1.0)
+                    yield line
+                except asyncio.TimeoutError:
+                    if not scan_manager.is_running and q.empty():
+                        break
+        finally:
+            if q in scan_manager.listeners:
+                scan_manager.listeners.remove(q)
+
+    return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+
+
+@app.get("/scan/status")
+async def get_scan_status():
+    """获取当前扫描任务运行状态、CPU节点信息与最近日志记录。"""
+    return {
+        "is_running": scan_manager.is_running,
+        "status": scan_manager.status,
+        "logs": scan_manager.logs,
+        "cpu_info": get_cpu_info()
+    }
+
+
+@app.post("/scan/stop")
+async def stop_scan():
+    """中途中止后台特征提取任务。"""
+    if not scan_manager.is_running:
+        return {"message": "当前没有在运行的扫描任务。"}
+    scan_manager.cancel_requested = True
+    return {"message": "已向后台扫描任务发送中止信号。"}
 
 
 @app.post("/recommend")
