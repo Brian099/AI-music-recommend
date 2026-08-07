@@ -200,9 +200,11 @@
         </div>
 
         <div class="lyrics-panel">
-            <img src="https://picsum.photos/200" class="cover-art-large" id="lyric-cover" alt="Cover">
-            <h3 id="lyric-title" style="font-size: 16px; margin-bottom: 4px;">Embeat Audio</h3>
-            <p id="lyric-artist" style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">选择曲目播放并同步歌词</p>
+            <div class="lyrics-header-pinned" style="display: flex; flex-direction: column; align-items: center; width: 100%; flex-shrink: 0; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                <img src="https://picsum.photos/200" class="cover-art-large" id="lyric-cover" alt="Cover">
+                <h3 id="lyric-title" style="font-size: 15px; margin-bottom: 4px; font-weight: 700; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Embeat Audio</h3>
+                <p id="lyric-artist" style="font-size: 12px; color: var(--text-muted); margin-bottom: 0px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">选择曲目播放并同步歌词</p>
+            </div>
             <div id="lyrics-container">
                 <div class="lyric-line active">🎵 欢迎使用 Embeat Audio</div>
                 <div class="lyric-line">请在左侧列表点播任意歌曲</div>
