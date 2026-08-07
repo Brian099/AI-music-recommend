@@ -9,6 +9,7 @@
 import os
 import sys
 import json
+import asyncio
 try:
     import httpx
     _HTTPX_AVAILABLE = True
