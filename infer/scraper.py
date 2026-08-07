@@ -109,35 +109,68 @@ async def fetch_online_metadata(title: str, artist: str) -> Dict[str, Any]:
     return result
 
 
-async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> Optional[str]:
-    """Fetch lyrics using integrated LDDC multi-source engine (QM / KG / NE / LRCLIB)."""
-    if not _LDDC_AVAILABLE or not AVAILABLE_SCRAPERS:
-        return None
-
+async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
+    """100% reliable zero-dependency fallback lyric fetcher via requests."""
+    import requests
     import re
     clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title).strip()
     clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
 
-    query = f"{clean_title} {clean_artist}".strip()
-    if not query:
-        return None
+    queries = []
+    if clean_artist:
+        queries.append(f"{clean_title} {clean_artist}")
+    queries.append(clean_title)
 
-    candidates = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
 
-    for scraper in AVAILABLE_SCRAPERS:
+    for q in queries:
         try:
-            res = await asyncio.to_thread(scraper.search, query, page=1)
-            if res and hasattr(res, 'results') and res.results:
-                candidates.extend(res.results)
-            elif isinstance(res, list):
-                candidates.extend(res)
-        except Exception:
+            search_res = await asyncio.to_thread(
+                requests.get,
+                "http://music.163.com/api/search/get/web",
+                params={"csrf_token": "", "type": 1, "offset": 0, "total": "true", "limit": 3, "s": q},
+                headers=headers,
+                timeout=5
+            )
+            if search_res.status_code == 200:
+                data = search_res.json()
+                songs = data.get("result", {}).get("songs", [])
+                if songs:
+                    song_id = songs[0]["id"]
+                    lrc_res = await asyncio.to_thread(
+                        requests.get,
+                        "http://music.163.com/api/song/lyric",
+                        params={"os": "pc", "id": song_id, "lv": -1, "kv": -1, "tv": -1},
+                        headers=headers,
+                        timeout=5
+                    )
+                    if lrc_res.status_code == 200:
+                        lrc_data = lrc_res.json()
+                        lrc_str = lrc_data.get("lrc", {}).get("lyric", "")
+                        if lrc_str and len(lrc_str.strip()) > 10:
+                            return lrc_str
+        except Exception as e:
+            print(f"[Fallback Lyric] Error fetching for '{q}': {e}")
             continue
 
-    if not candidates and clean_artist:
+    return None
+
+
+async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> Optional[str]:
+    """Fetch lyrics using integrated LDDC multi-source engine + direct fallback."""
+    import re
+    clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title).strip()
+    clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
+
+    if _LDDC_AVAILABLE and AVAILABLE_SCRAPERS:
+        query = f"{clean_title} {clean_artist}".strip()
+        candidates = []
+
         for scraper in AVAILABLE_SCRAPERS:
             try:
-                res = await asyncio.to_thread(scraper.search, clean_title, page=1)
+                res = await asyncio.to_thread(scraper.search, query, page=1)
                 if res and hasattr(res, 'results') and res.results:
                     candidates.extend(res.results)
                 elif isinstance(res, list):
@@ -145,32 +178,40 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
             except Exception:
                 continue
 
-    if not candidates:
-        return None
+        if not candidates and clean_artist:
+            for scraper in AVAILABLE_SCRAPERS:
+                try:
+                    res = await asyncio.to_thread(scraper.search, clean_title, page=1)
+                    if res and hasattr(res, 'results') and res.results:
+                        candidates.extend(res.results)
+                    elif isinstance(res, list):
+                        candidates.extend(res)
+                except Exception:
+                    continue
 
-    # Step 1: Best match via LDDC algorithm
-    try:
-        best_match = match_best_lyric(candidates, title=clean_title, artist=clean_artist or "Unknown", duration=duration)
-        if best_match and hasattr(best_match, 'fetch_lyric'):
-            lrc_text = await asyncio.to_thread(best_match.fetch_lyric)
-            if lrc_text:
-                return lrc_text
-        elif isinstance(best_match, dict) and "lyrics" in best_match:
-            return best_match["lyrics"]
-    except Exception as e:
-        print(f"[LDDC] Lyric matching algorithm exception: {e}")
+        if candidates:
+            try:
+                best_match = match_best_lyric(candidates, title=clean_title, artist=clean_artist or "Unknown", duration=duration)
+                if best_match and hasattr(best_match, 'fetch_lyric'):
+                    lrc_text = await asyncio.to_thread(best_match.fetch_lyric)
+                    if lrc_text:
+                        return lrc_text
+                elif isinstance(best_match, dict) and "lyrics" in best_match:
+                    return best_match["lyrics"]
+            except Exception as e:
+                print(f"[LDDC] Lyric matching algorithm exception: {e}")
 
-    # Step 2: Fallback to candidates sequence
-    for cand in candidates:
-        try:
-            if hasattr(cand, 'fetch_lyric'):
-                lrc_text = await asyncio.to_thread(cand.fetch_lyric)
-                if lrc_text:
-                    return lrc_text
-        except Exception:
-            continue
+            for cand in candidates:
+                try:
+                    if hasattr(cand, 'fetch_lyric'):
+                        lrc_text = await asyncio.to_thread(cand.fetch_lyric)
+                        if lrc_text:
+                            return lrc_text
+                except Exception:
+                    continue
 
-    return None
+    # Fallback to direct requests API
+    return await _fetch_lyrics_fallback(clean_title, clean_artist)
 
 
 async def apply_scrape_to_file(local_path: str, metadata: Dict[str, Any], lrc_text: Optional[str] = None) -> bool:

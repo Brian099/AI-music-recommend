@@ -246,36 +246,41 @@ async def get_audio_cover(path: str = Query(...)):
 async def get_lyrics(path: str = Query(...), title: Optional[str] = None, artist: Optional[str] = None):
     """
     Hybrid lyrics strategy:
-    1. Read local .lrc file or SQLite record (0ms latency)
-    2. Fallback to LDDC online fetch & auto-save to disk
+    1. Read local .lrc file (0ms latency)
+    2. Fallback to online fetch & auto-save to disk
     """
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="File does not exist")
+    q_title = title
+    q_artist = artist
 
-    base_path = os.path.splitext(path)[0]
-    lrc_file = f"{base_path}.lrc"
+    if path:
+        base_path = os.path.splitext(path)[0]
+        if not q_title:
+            q_title = os.path.basename(base_path)
+        
+        lrc_file = f"{base_path}.lrc"
+        if os.path.exists(lrc_file):
+            try:
+                with open(lrc_file, "r", encoding="utf-8") as f:
+                    return {"source": "local", "lyrics": f.read()}
+            except Exception:
+                pass
 
-    # Step 1: Local .lrc file
-    if os.path.exists(lrc_file):
-        try:
-            with open(lrc_file, "r", encoding="utf-8") as f:
-                return {"source": "local", "lyrics": f.read()}
-        except Exception:
-            pass
-
-    # Step 2: LDDC On-the-Fly Online Fetch & Auto-Save
-    q_title = title or os.path.basename(base_path)
-    q_artist = artist or "Unknown Artist"
+    # Online Fetch & Auto-Save
+    q_title = q_title or "Unknown Track"
+    q_artist = q_artist or "Unknown Artist"
 
     lrc_text = await fetch_lyrics_lddc(title=q_title, artist=q_artist)
     if lrc_text:
-        try:
-            with open(lrc_file, "w", encoding="utf-8") as f:
-                f.write(lrc_text)
-        except Exception as e:
-            print(f"[Lyrics] Save .lrc failed: {e}")
+        if path and os.path.exists(os.path.dirname(path)):
+            base_path = os.path.splitext(path)[0]
+            lrc_file = f"{base_path}.lrc"
+            try:
+                with open(lrc_file, "w", encoding="utf-8") as f:
+                    f.write(lrc_text)
+            except Exception as e:
+                print(f"[Lyrics] Save .lrc failed: {e}")
 
-        return {"source": "lddc_online", "lyrics": lrc_text}
+        return {"source": "online", "lyrics": lrc_text}
 
     return {"source": "none", "lyrics": "[00:00.00]暂无歌词"}
 
