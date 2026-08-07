@@ -109,6 +109,10 @@ async def fetch_online_metadata(title: str, artist: str) -> Dict[str, Any]:
     return result
 
 
+import logging
+logger = logging.getLogger("embeat")
+
+
 async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
     """100% reliable zero-dependency fallback lyric fetcher via requests."""
     import requests
@@ -125,11 +129,11 @@ async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
     }
 
-    print(f"[Lyric Log] Starting direct requests fallback search for queries={queries}")
+    logger.info(f"[Lyric Log] Starting direct requests fallback search for queries={queries}")
 
     for q in queries:
         try:
-            print(f"[Lyric Log] Querying NetEase API for '{q}'...")
+            logger.info(f"[Lyric Log] Querying NetEase API for '{q}'...")
             search_res = await asyncio.to_thread(
                 requests.get,
                 "http://music.163.com/api/search/get/web",
@@ -140,12 +144,12 @@ async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
             if search_res.status_code == 200:
                 data = search_res.json()
                 songs = data.get("result", {}).get("songs", [])
-                print(f"[Lyric Log] NetEase search for '{q}' returned {len(songs)} song candidates")
+                logger.info(f"[Lyric Log] NetEase search for '{q}' returned {len(songs)} song candidates")
                 if songs:
                     song_id = songs[0]["id"]
                     song_name = songs[0].get("name", "")
                     artist_name = songs[0].get("artists", [{}])[0].get("name", "")
-                    print(f"[Lyric Log] Top candidate: id={song_id}, name='{song_name}', artist='{artist_name}'")
+                    logger.info(f"[Lyric Log] Top candidate: id={song_id}, name='{song_name}', artist='{artist_name}'")
 
                     lrc_res = await asyncio.to_thread(
                         requests.get,
@@ -158,17 +162,17 @@ async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
                         lrc_data = lrc_res.json()
                         lrc_str = lrc_data.get("lrc", {}).get("lyric", "")
                         if lrc_str and len(lrc_str.strip()) > 10:
-                            print(f"[Lyric Log] SUCCESS: Fetched {len(lrc_str)} chars of LRC lyrics via fallback!")
+                            logger.info(f"[Lyric Log] SUCCESS: Fetched {len(lrc_str)} chars of LRC lyrics via fallback!")
                             return lrc_str
                         else:
-                            print(f"[Lyric Log] Song id={song_id} returned empty or invalid lyric string.")
+                            logger.warning(f"[Lyric Log] Song id={song_id} returned empty or invalid lyric string.")
             else:
-                print(f"[Lyric Log] NetEase search HTTP error status={search_res.status_code}")
+                logger.warning(f"[Lyric Log] NetEase search HTTP error status={search_res.status_code}")
         except Exception as e:
-            print(f"[Lyric Log] Exception during fallback search for '{q}': {e}")
+            logger.error(f"[Lyric Log] Exception during fallback search for '{q}': {e}")
             continue
 
-    print(f"[Lyric Log] Fallback search finished with NO lyrics found.")
+    logger.warning(f"[Lyric Log] Fallback search finished with NO lyrics found.")
     return None
 
 
@@ -178,7 +182,7 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
     clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title).strip()
     clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
 
-    print(f"[Lyric Log] fetch_lyrics_lddc called | raw_title='{title}', clean_title='{clean_title}', clean_artist='{clean_artist}', LDDC_AVAILABLE={_LDDC_AVAILABLE}")
+    logger.info(f"[Lyric Log] fetch_lyrics_lddc called | raw_title='{title}', clean_title='{clean_title}', clean_artist='{clean_artist}', LDDC_AVAILABLE={_LDDC_AVAILABLE}, scrapers_count={len(AVAILABLE_SCRAPERS)}")
 
     if _LDDC_AVAILABLE and AVAILABLE_SCRAPERS:
         query = f"{clean_title} {clean_artist}".strip()
@@ -192,13 +196,13 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
                 elif isinstance(res, list):
                     candidates.extend(res)
             except Exception as e:
-                print(f"[Lyric Log] Scraper {scraper.__class__.__name__} search error: {e}")
+                logger.warning(f"[Lyric Log] Scraper {scraper.__class__.__name__} search error: {e}")
                 continue
 
-        print(f"[Lyric Log] LDDC scrapers search returned {len(candidates)} total candidates for query='{query}'")
+        logger.info(f"[Lyric Log] LDDC scrapers search returned {len(candidates)} total candidates for query='{query}'")
 
         if not candidates and clean_artist:
-            print(f"[Lyric Log] No candidates for '{query}', retrying title-only query='{clean_title}'...")
+            logger.info(f"[Lyric Log] No candidates for '{query}', retrying title-only query='{clean_title}'...")
             for scraper in AVAILABLE_SCRAPERS:
                 try:
                     res = await asyncio.to_thread(scraper.search, clean_title, page=1)
@@ -215,24 +219,24 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
                 if best_match and hasattr(best_match, 'fetch_lyric'):
                     lrc_text = await asyncio.to_thread(best_match.fetch_lyric)
                     if lrc_text:
-                        print(f"[Lyric Log] SUCCESS: LDDC match_best_lyric fetched {len(lrc_text)} chars!")
+                        logger.info(f"[Lyric Log] SUCCESS: LDDC match_best_lyric fetched {len(lrc_text)} chars!")
                         return lrc_text
                 elif isinstance(best_match, dict) and "lyrics" in best_match:
                     return best_match["lyrics"]
             except Exception as e:
-                print(f"[Lyric Log] LDDC match_best_lyric algorithm exception: {e}")
+                logger.warning(f"[Lyric Log] LDDC match_best_lyric algorithm exception: {e}")
 
             for cand in candidates:
                 try:
                     if hasattr(cand, 'fetch_lyric'):
                         lrc_text = await asyncio.to_thread(cand.fetch_lyric)
                         if lrc_text:
-                            print(f"[Lyric Log] SUCCESS: Candidate fallback fetched {len(lrc_text)} chars!")
+                            logger.info(f"[Lyric Log] SUCCESS: Candidate fallback fetched {len(lrc_text)} chars!")
                             return lrc_text
                 except Exception:
                     continue
 
-    print(f"[Lyric Log] LDDC scrapers yields no lyric, initiating direct requests fallback...")
+    logger.info(f"[Lyric Log] LDDC scrapers yields no lyric, initiating direct requests fallback...")
     return await _fetch_lyrics_fallback(clean_title, clean_artist)
 
 
