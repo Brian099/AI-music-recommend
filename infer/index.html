@@ -152,10 +152,10 @@
 
     <main>
         <div class="sidebar">
-            <div class="nav-item active" onclick="switchNav('folder')">📁 目录零等待点播</div>
-            <div class="nav-item" onclick="switchNav('artist')">🎤 按歌手浏览</div>
-            <div class="nav-item" onclick="switchNav('album')">💿 按专辑浏览</div>
-            <div class="nav-item" onclick="switchNav('radio')">⚡ AI 漫游电台</div>
+            <div class="nav-item active" onclick="switchNav('folder', event)">📁 目录零等待点播</div>
+            <div class="nav-item" onclick="switchNav('artist', event)">🎤 按歌手浏览</div>
+            <div class="nav-item" onclick="switchNav('album', event)">💿 按专辑浏览</div>
+            <div class="nav-item" onclick="switchNav('radio', event)">⚡ AI 漫游电台</div>
         </div>
 
         <div class="content-panel" id="content-panel">
@@ -355,13 +355,144 @@
         };
 
         async function toggleAIRadio() {
-            alert("⚡ AI 漫游电台已开启：系统将自动按声学特征连续播放相似歌曲");
+            switchNav('radio');
         }
 
-        function switchNav(type) {
+        async function switchNav(type, e) {
             document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-            event.currentTarget.classList.add("active");
-            if (type === 'folder') loadFolder('/music');
+            if (e && e.currentTarget) {
+                e.currentTarget.classList.add("active");
+            } else if (event && event.currentTarget) {
+                event.currentTarget.classList.add("active");
+            }
+
+            if (type === 'folder') {
+                loadFolder('/music');
+            } else if (type === 'artist') {
+                loadArtists();
+            } else if (type === 'album') {
+                loadAlbums();
+            } else if (type === 'radio') {
+                loadAIRadio();
+            }
+        }
+
+        async function loadArtists() {
+            const bc = document.getElementById("breadcrumb");
+            bc.innerHTML = `<span class="breadcrumb-item">🎤 按歌手分类浏览</span>`;
+
+            try {
+                const res = await fetch("/api/library/artists");
+                const data = await res.json();
+
+                const tbody = document.getElementById("song-list");
+                tbody.innerHTML = "";
+
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">暂无歌手数据库记录（请登录后台启动全盘扫描入库）</td></tr>`;
+                    return;
+                }
+
+                data.forEach(a => {
+                    const tr = document.createElement("tr");
+                    tr.className = "song-row";
+                    tr.onclick = () => loadTracksByArtist(a.artist_name);
+                    tr.innerHTML = `
+                        <td>🎤 <b>${a.artist_name}</b></td>
+                        <td>歌手</td>
+                        <td>${a.track_count || 1} 首曲目</td>
+                        <td><button style="padding:4px 8px; border-radius:6px; background:var(--primary); color:#fff; border:none; cursor:pointer;">查看曲目</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function loadTracksByArtist(artistName) {
+            const bc = document.getElementById("breadcrumb");
+            bc.innerHTML = `<span class="breadcrumb-item" onclick="loadArtists()">🎤 按歌手浏览</span> &gt; <span class="breadcrumb-item">${artistName}</span>`;
+
+            const res = await fetch(`/api/library/tracks?artist=${encodeURIComponent(artistName)}`);
+            const data = await res.json();
+            renderTrackTable(data);
+        }
+
+        async function loadAlbums() {
+            const bc = document.getElementById("breadcrumb");
+            bc.innerHTML = `<span class="breadcrumb-item">💿 按专辑分类浏览</span>`;
+
+            try {
+                const res = await fetch("/api/library/albums");
+                const data = await res.json();
+
+                const tbody = document.getElementById("song-list");
+                tbody.innerHTML = "";
+
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">暂无专辑数据库记录（请登录后台启动全盘扫描入库）</td></tr>`;
+                    return;
+                }
+
+                data.forEach(a => {
+                    const tr = document.createElement("tr");
+                    tr.className = "song-row";
+                    tr.onclick = () => loadTracksByAlbum(a.album_name);
+                    tr.innerHTML = `
+                        <td>💿 <b>${a.album_name}</b></td>
+                        <td>${a.artist_name || '群星'}</td>
+                        <td>${a.track_count || 1} 首曲目</td>
+                        <td><button style="padding:4px 8px; border-radius:6px; background:var(--primary); color:#fff; border:none; cursor:pointer;">查看曲目</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function loadTracksByAlbum(albumName) {
+            const bc = document.getElementById("breadcrumb");
+            bc.innerHTML = `<span class="breadcrumb-item" onclick="loadAlbums()">💿 按专辑浏览</span> &gt; <span class="breadcrumb-item">${albumName}</span>`;
+
+            const res = await fetch(`/api/library/tracks?album=${encodeURIComponent(albumName)}`);
+            const data = await res.json();
+            renderTrackTable(data);
+        }
+
+        async function loadAIRadio() {
+            const bc = document.getElementById("breadcrumb");
+            bc.innerHTML = `<span class="breadcrumb-item">⚡ AI 漫游电台（声学向量推荐）</span>`;
+
+            try {
+                const res = await fetch("/api/library/tracks");
+                const data = await res.json();
+                renderTrackTable(data);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function renderTrackTable(tracks) {
+            const tbody = document.getElementById("song-list");
+            tbody.innerHTML = "";
+            if (!tracks || tracks.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">暂无曲目数据</td></tr>`;
+                return;
+            }
+            tracks.forEach(file => {
+                const tr = document.createElement("tr");
+                tr.className = "song-row";
+                tr.onclick = () => playSong(file);
+                tr.innerHTML = `
+                    <td>🎵 ${file.track_name}</td>
+                    <td>${file.artist_name}</td>
+                    <td>${file.file_size ? (file.file_size / 1048576).toFixed(1) + ' MB' : (file.format || 'FLAC')}</td>
+                    <td><button style="padding:4px 8px; border-radius:6px; background:var(--primary); color:#fff; border:none; cursor:pointer;" onclick="event.stopPropagation(); playSong(${JSON.stringify(file).replace(/"/g, '&quot;')})">播放</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
         }
 
         // Init load
