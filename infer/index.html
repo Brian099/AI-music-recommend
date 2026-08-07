@@ -713,7 +713,7 @@
                         const container = document.getElementById("lyrics-container");
                         if (activeEl && container) {
                             activeEl.classList.add("active");
-                            const topPos = activeEl.offsetTop - (container.clientHeight * 0.35);
+                            const topPos = activeEl.offsetTop - 160;
                             container.scrollTo({ top: Math.max(0, topPos), behavior: "smooth" });
                         }
                     }
