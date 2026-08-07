@@ -379,6 +379,8 @@ async def _run_micro_batch_scan(workers: int):
         scan_mgr.is_running = False
         scan_mgr.status["is_running"] = False
         scan_mgr.status["phase"] = "done"
+        scan_mgr.status["percent"] = 100
+        scan_mgr.add_log(f"✓ 所有 {len(audio_files)} 首曲目均已在数据库中（断点秒级跳过），无需重复处理！")
         return
 
     sem = asyncio.Semaphore(workers)
@@ -417,11 +419,13 @@ async def _run_micro_batch_scan(workers: int):
         scan_mgr.status["current"] = processed
         scan_mgr.status["total"] = len(to_process)
         scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
+        scan_mgr.add_log(f"-> 已成功扫描入库 {processed}/{len(to_process)} 首曲目 ({scan_mgr.status['percent']}%)")
 
     scan_mgr.is_running = False
     scan_mgr.status["is_running"] = False
     scan_mgr.status["phase"] = "done"
-    scan_mgr.add_log(f"✓ 扫描任务完成！新增/更新 {processed} 首曲目。")
+    scan_mgr.status["percent"] = 100
+    scan_mgr.add_log(f"✓ 扫描任务完成！新增/更新入库 {processed} 首曲目。")
 
 
 # ── Quality, Dedupe & Scrape Protected APIs ───────────────────────────────────

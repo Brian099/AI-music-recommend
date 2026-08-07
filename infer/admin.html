@@ -79,8 +79,16 @@
             <h3>📊 系统硬件与扫描引擎</h3>
             <p style="margin: 12px 0; color: var(--text-muted);" id="db-status">4500万预置数据库检测中...</p>
             <p style="margin-bottom: 16px; color: var(--text-muted);" id="cpu-status">硬件线程评估中...</p>
-            <button class="btn" onclick="startScan()">启动增量断点续扫</button>
-            <button class="btn" style="background: var(--accent-red);" onclick="stopScan()">中止扫描</button>
+            <div style="display:flex; gap:10px;">
+                <button class="btn" onclick="startScan()">启动增量断点续扫</button>
+                <button class="btn" style="background: var(--accent-red);" onclick="stopScan()">中止扫描</button>
+            </div>
+            <div style="margin-top: 14px; width: 100%; background: rgba(255,255,255,0.1); height: 8px; border-radius: 4px; overflow: hidden;">
+                <div id="scan-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #a044ff, #00ff88); transition: width 0.3s ease;"></div>
+            </div>
+            <div style="margin-top: 12px; background: rgba(0,0,0,0.4); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 12px; height: 110px; overflow-y: auto; color: var(--text-main);" id="scan-log-box">
+                <div style="color: var(--text-muted);">系统日志控制台就绪...</div>
+            </div>
         </div>
 
         <!-- True Lossless Inspector -->
@@ -134,26 +142,51 @@
             }
         }
 
+        let pollTimer = null;
+
         async function loadAdminStatus() {
-            const res = await fetch("/api/admin/status", {
-                headers: { "X-Admin-Token": adminToken }
-            });
-            if (res.status === 401) {
-                document.getElementById("login-modal").style.display = "flex";
-                return;
+            try {
+                const res = await fetch("/api/admin/status", {
+                    headers: { "X-Admin-Token": adminToken }
+                });
+                if (res.status === 401) {
+                    document.getElementById("login-modal").style.display = "flex";
+                    return;
+                }
+                const data = await res.json();
+                document.getElementById("db-status").innerText = data.has_global_db ? "🟢 4500万预置数据库: 已就绪 (使能加速比对)" : "⚪ 纯本地轻量模式: 运行中";
+                document.getElementById("cpu-status").innerText = `逻辑 CPU 核心: ${data.cpu.total_cpus} 核 | 硬件限制并发: ${data.cpu.max_workers} 线程 (保留1核防卡顿)`;
+
+                const logBox = document.getElementById("scan-log-box");
+                if (data.logs && data.logs.length > 0) {
+                    logBox.innerHTML = data.logs.map(l => `<div style="padding: 2px 0;">${l}</div>`).join("");
+                    logBox.scrollTop = logBox.scrollHeight;
+                }
+
+                const progressBar = document.getElementById("scan-progress-bar");
+                if (data.status && data.status.is_running) {
+                    const pct = data.status.percent || 10;
+                    progressBar.style.width = pct + "%";
+                    if (!pollTimer) pollTimer = setInterval(loadAdminStatus, 1500);
+                } else {
+                    progressBar.style.width = (data.status && data.status.phase === 'done') ? "100%" : "0%";
+                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                }
+            } catch (err) {
+                console.error(err);
             }
-            const data = await res.json();
-            document.getElementById("db-status").innerText = data.has_global_db ? "🟢 4500万预置数据库: 已就绪 (使能加速比对)" : "⚪ 纯本地轻量模式: 运行中";
-            document.getElementById("cpu-status").innerText = `逻辑 CPU 核心: ${data.cpu.total_cpus} 核 | 硬件限制并发: ${data.cpu.max_workers} 线程 (保留1核防卡顿)`;
         }
 
         async function startScan() {
-            await fetch("/api/scan/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            alert("扫描已启动！");
+            const res = await fetch("/api/scan/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
+            const data = await res.json();
+            alert(data.message || "扫描已启动！");
+            loadAdminStatus();
         }
 
         async function stopScan() {
             await fetch("/api/scan/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
+            loadAdminStatus();
         }
 
         async function inspectLossless() {
