@@ -113,11 +113,18 @@
             border: 1px solid var(--glass-border);
             border-radius: 16px; padding: 20px;
             display: flex; flex-direction: column; align-items: center; text-align: center;
-            backdrop-filter: blur(20px); overflow-y: auto;
+            backdrop-filter: blur(20px); overflow: hidden; height: 100%; box-sizing: border-box;
         }
-        .cover-art-large { width: 180px; height: 180px; border-radius: 14px; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 16px; }
-        .lyric-line { padding: 8px 0; font-size: 15px; color: var(--text-muted); transition: all 0.3s ease; cursor: pointer; }
-        .lyric-line.active { font-size: 18px; font-weight: 700; color: var(--accent-green); transform: scale(1.05); }
+        #lyrics-container {
+            width: 100%; flex: 1; overflow-y: auto;
+            scroll-behavior: smooth; padding: 40px 0;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        #lyrics-container::-webkit-scrollbar { width: 4px; }
+        #lyrics-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        .cover-art-large { width: 160px; height: 160px; border-radius: 14px; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 12px; flex-shrink: 0; }
+        .lyric-line { padding: 8px 12px; font-size: 14px; color: var(--text-muted); transition: all 0.3s ease; cursor: pointer; text-align: center; width: 100%; word-break: break-word; }
+        .lyric-line.active { font-size: 17px; font-weight: 700; color: var(--accent-green); transform: scale(1.04); }
 
         /* Bottom Player Bar */
         .player-bar {
@@ -432,9 +439,11 @@
                     if (activeIdx !== -1) {
                         document.querySelectorAll(".lyric-line").forEach(el => el.classList.remove("active"));
                         const activeEl = document.getElementById(`lyric-line-${activeIdx}`);
-                        if (activeEl) {
+                        const container = document.getElementById("lyrics-container");
+                        if (activeEl && container) {
                             activeEl.classList.add("active");
-                            activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                            const topPos = activeEl.offsetTop - (container.clientHeight / 2) + (activeEl.clientHeight / 2);
+                            container.scrollTo({ top: topPos, behavior: "smooth" });
                         }
                     }
                 }
