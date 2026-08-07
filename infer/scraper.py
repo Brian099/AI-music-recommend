@@ -26,17 +26,40 @@ if infer_path not in sys.path:
 
 from infer.library_db import library_db
 
-# Try importing LDDC core components from infer/LDDC
+# # Try importing LDDC core components individually for maximum resilience
+AVAILABLE_SCRAPERS = []
+
 try:
     from LDDC.core.api.lyrics.qm import QMScraper
-    from LDDC.core.api.lyrics.kg import KGScraper
+    AVAILABLE_SCRAPERS.append(QMScraper())
+except Exception as e:
+    print(f"[Scraper] QMScraper load notice: {e}")
+
+try:
     from LDDC.core.api.lyrics.ne import NEScraper
+    AVAILABLE_SCRAPERS.append(NEScraper())
+except Exception as e:
+    print(f"[Scraper] NEScraper load notice: {e}")
+
+try:
     from LDDC.core.api.lyrics.lrclib import LRCLIBScraper
+    AVAILABLE_SCRAPERS.append(LRCLIBScraper())
+except Exception as e:
+    print(f"[Scraper] LRCLIBScraper load notice: {e}")
+
+try:
+    from LDDC.core.api.lyrics.kg import KGScraper
+    AVAILABLE_SCRAPERS.append(KGScraper())
+except Exception as e:
+    print(f"[Scraper] KGScraper load notice: {e}")
+
+try:
     from LDDC.core.algorithm import match_best_lyric
-    _LDDC_AVAILABLE = True
-except ImportError as e:
-    print(f"[Scraper] Warning: LDDC lyric module import failed: {e}")
-    _LDDC_AVAILABLE = False
+    _MATCH_BEST_AVAILABLE = True
+except Exception as e:
+    _MATCH_BEST_AVAILABLE = False
+
+_LDDC_AVAILABLE = len(AVAILABLE_SCRAPERS) > 0 and _MATCH_BEST_AVAILABLE
 
 
 async def fetch_online_metadata(title: str, artist: str) -> Dict[str, Any]:
@@ -57,27 +80,26 @@ async def fetch_online_metadata(title: str, artist: str) -> Dict[str, Any]:
 
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            url = f"https://itunes.apple.com/search?term={httpx.QueryParams({'term': query})}&media=music&limit=3"
-            res = await client.get(url)
-            if res.status_code == 200:
-                data = res.json()
-                results = data.get("results", [])
-                if results:
-                    best = results[0]
+            resp = await client.get(
+                "https://itunes.apple.com/search",
+                params={"term": query, "media": "music", "limit": 1}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("resultCount", 0) > 0:
+                    best = data["results"][0]
                     result["title"] = best.get("trackName", title)
                     result["artist"] = best.get("artistName", artist)
                     result["album"] = best.get("collectionName", "")
                     result["genre"] = best.get("primaryGenreName", "")
-                    result["track_number"] = best.get("trackNumber")
-                    
-                    release_date = best.get("releaseDate", "")
-                    if len(release_date) >= 4:
+                    result["track_number"] = best.get("trackNumber", None)
+
+                    if best.get("releaseDate"):
                         try:
-                            result["year"] = int(release_date[:4])
+                            result["year"] = int(best["releaseDate"][:4])
                         except ValueError:
                             pass
-                            
-                    # High-res cover art URL (600x600)
+
                     artwork = best.get("artworkUrl100", "")
                     if artwork:
                         result["cover_url"] = artwork.replace("100x100bb.jpg", "600x600bb.jpg")
@@ -89,7 +111,7 @@ async def fetch_online_metadata(title: str, artist: str) -> Dict[str, Any]:
 
 async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> Optional[str]:
     """Fetch lyrics using integrated LDDC multi-source engine (QM / KG / NE / LRCLIB)."""
-    if not _LDDC_AVAILABLE:
+    if not _LDDC_AVAILABLE or not AVAILABLE_SCRAPERS:
         return None
 
     import re
@@ -100,10 +122,9 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
     if not query:
         return None
 
-    scrapers = [QMScraper(), NEScraper(), LRCLIBScraper(), KGScraper()]
     candidates = []
 
-    for scraper in scrapers:
+    for scraper in AVAILABLE_SCRAPERS:
         try:
             res = await asyncio.to_thread(scraper.search, query, page=1)
             if res and hasattr(res, 'results') and res.results:
@@ -114,7 +135,7 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
             continue
 
     if not candidates and clean_artist:
-        for scraper in scrapers:
+        for scraper in AVAILABLE_SCRAPERS:
             try:
                 res = await asyncio.to_thread(scraper.search, clean_title, page=1)
                 if res and hasattr(res, 'results') and res.results:
@@ -127,16 +148,27 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
     if not candidates:
         return None
 
-    # Use LDDC fuzzy match algorithm
+    # Step 1: Best match via LDDC algorithm
     try:
         best_match = match_best_lyric(candidates, title=clean_title, artist=clean_artist or "Unknown", duration=duration)
         if best_match and hasattr(best_match, 'fetch_lyric'):
             lrc_text = await asyncio.to_thread(best_match.fetch_lyric)
-            return lrc_text
+            if lrc_text:
+                return lrc_text
         elif isinstance(best_match, dict) and "lyrics" in best_match:
             return best_match["lyrics"]
     except Exception as e:
-        print(f"[LDDC] Lyric matching exception: {e}")
+        print(f"[LDDC] Lyric matching algorithm exception: {e}")
+
+    # Step 2: Fallback to candidates sequence
+    for cand in candidates:
+        try:
+            if hasattr(cand, 'fetch_lyric'):
+                lrc_text = await asyncio.to_thread(cand.fetch_lyric)
+                if lrc_text:
+                    return lrc_text
+        except Exception:
+            continue
 
     return None
 
