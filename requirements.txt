@@ -25,4 +25,9 @@ fastapi
 uvicorn
 python-dotenv
 mutagen
+httpx
+diskcache
+charset-normalizer
+pyaes
+psutil
 

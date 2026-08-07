@@ -10,11 +10,17 @@ __pycache__/
 venv/
 env/
 
-# Qdrant 本地数据
+# Qdrant 本地数据及预置数据包
 storage/
 qdrant_storage/
+embeat_qdrant_db/
 snapshots/
 .qdrant-initialized
+
+# 关系数据库与媒体库数据缓存
+data/
+*.db
+*.sqlite
 
 # 本地音乐文件（用户自行挂载）
 测试音乐/

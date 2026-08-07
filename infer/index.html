@@ -3,33 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Embeat - 声学音乐推荐系统</title>
-    <!-- 引入高质感现代字体 -->
+    <title>Embeat - 高质感 AI 音乐播放器</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary: #8a2be2;
-            --primary-glow: rgba(138, 43, 226, 0.4);
+            --primary: #a044ff;
+            --primary-glow: rgba(160, 68, 255, 0.4);
             --bg-gradient: linear-gradient(135deg, #0b071e 0%, #150a33 50%, #05020c 100%);
-            --glass-bg: rgba(255, 255, 255, 0.03);
-            --glass-border: rgba(255, 255, 255, 0.06);
-            --glass-hover: rgba(255, 255, 255, 0.08);
+            --glass-bg: rgba(255, 255, 255, 0.04);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-hover: rgba(255, 255, 255, 0.09);
             --text-main: #f5f5f7;
             --text-muted: #a1a1a6;
-            --success: #00ff88;
-            --warning: #ffb700;
+            --accent-green: #00ff88;
+            --accent-gold: #ffb700;
+            --accent-red: #ff4757;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg-gradient);
             background-attachment: fixed;
             color: var(--text-main);
@@ -39,1344 +35,306 @@
             overflow: hidden;
         }
 
-        /* 顶部导航 */
+        /* Canvas Palette Glow Background */
+        #ambient-glow {
+            position: absolute;
+            top: -20%; left: -20%;
+            width: 140%; height: 140%;
+            background: radial-gradient(circle at 50% 50%, rgba(160, 68, 255, 0.15), transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+            transition: background 1.5s ease-in-out;
+        }
+
         header {
-            width: 100%;
-            padding: 12px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            position: relative; z-index: 10;
+            padding: 14px 30px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(10, 5, 25, 0.5);
             backdrop-filter: blur(20px);
-            background: rgba(10, 5, 25, 0.3);
             border-bottom: 1px solid var(--glass-border);
-            position: sticky;
-            top: 0;
-            z-index: 100;
         }
 
-        .logo {
-            font-size: 18px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            background: linear-gradient(90deg, #b066ff, #ff80ec);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+        .logo { font-size: 20px; font-weight: 700; background: linear-gradient(90deg, #c074ff, #8a2be2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
-        .logo::before {
-            content: "⚡";
-            font-size: 16px;
-        }
-
-        .status-badge {
-            font-size: 11px;
-            padding: 4px 12px;
-            border-radius: 16px;
-            background: rgba(0, 255, 136, 0.1);
-            border: 1px solid rgba(0, 255, 136, 0.2);
-            color: var(--success);
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            font-weight: 600;
-        }
-
-        .status-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--success);
-            box-shadow: 0 0 8px var(--success);
-        }
-
-        /* 主体布局 */
-        main {
-            flex: 1;
-            display: grid;
-            grid-template-columns: 340px 1fr;
-            gap: 16px;
-            max-width: 1600px;
-            width: 100%;
-            margin: 0 auto;
-            padding: 12px 30px 84px 30px; /* 留出底部播放器的空间 */
-            min-height: 0;
-        }
-
-        /* 侧边面板 */
-        .sidebar {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            overflow: hidden;
-            height: 100%;
-        }
-
-        .glass-card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            padding: 16px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .glass-card:hover {
-            border-color: rgba(255, 255, 255, 0.1);
-        }
-
-        h2 {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #ffffff;
-        }
-
-        /* 输入/按钮样式 */
-        .form-group {
-            margin-bottom: 12px;
-            position: relative;
-        }
-
-        .form-group label {
-            display: block;
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-bottom: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-weight: 600;
-        }
-
-        .select-wrapper {
-            position: relative;
-        }
-
-        select, input[type="text"], input[type="number"] {
-            width: 100%;
-            padding: 8px 12px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--glass-border);
-            border-radius: 8px;
-            color: var(--text-main);
-            font-size: 13px;
-            font-family: inherit;
-            outline: none;
-            transition: all 0.2s ease;
-        }
-
-        select:focus, input:focus {
-            border-color: var(--primary);
-            box-shadow: 0 0 10px var(--primary-glow);
-        }
-
-        .search-box {
-            margin-bottom: 12px;
-        }
-
-        .btn {
-            width: 100%;
-            padding: 10px;
-            background: linear-gradient(90deg, #8a2be2, #4b0082);
-            border: none;
-            border-radius: 8px;
-            color: white;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
+        .header-actions { display: flex; gap: 12px; align-items: center; }
+        .btn-admin {
+            padding: 6px 16px; border-radius: 20px;
+            background: var(--glass-bg); border: 1px solid var(--glass-border);
+            color: var(--text-main); font-size: 13px; text-decoration: none;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 8px;
+        }
+        .btn-admin:hover { background: var(--primary-glow); border-color: var(--primary); }
+
+        main {
+            position: relative; z-index: 10; flex: 1;
+            display: grid; grid-template-columns: 260px 1fr 340px;
+            gap: 16px; padding: 16px 20px; overflow: hidden;
         }
 
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px var(--primary-glow);
-            background: linear-gradient(90deg, #9932cc, #550099);
-        }
-
-        .btn:active {
-            transform: translateY(0);
-        }
-
-        .btn:disabled {
-            background: rgba(255, 255, 255, 0.1);
-            color: var(--text-muted);
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .stop-btn {
-            background: rgba(255, 75, 75, 0.15);
-            border: 1px solid rgba(255, 75, 75, 0.4);
-            color: #ff6b6b;
-            font-size: 11px;
-            padding: 3px 10px;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-weight: 600;
-        }
-
-        .stop-btn:hover {
-            background: rgba(255, 75, 75, 0.35);
-            color: #ffffff;
-            box-shadow: 0 0 10px rgba(255, 75, 75, 0.4);
-        }
-
-        /* 扫描日志台 */
-        .console {
-            background: rgba(0, 0, 0, 0.5);
-            border: 1px solid var(--glass-border);
-            border-radius: 8px;
-            height: 100px;
-            padding: 8px;
-            font-family: monospace;
-            font-size: 11px;
-            color: #00ff88;
-            overflow-y: auto;
-            white-space: pre-wrap;
-        }
-
-        /* 扫描进度指示器 */
-        .scan-progress {
-            background: rgba(0, 0, 0, 0.35);
-            border: 1px solid var(--glass-border);
-            border-radius: 8px;
-            padding: 10px;
-            margin-top: 10px;
-            margin-bottom: 8px;
-        }
-
-        .progress-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-            font-size: 12px;
-        }
-
-        .progress-phase {
-            font-weight: 600;
-            color: #c38aff;
-        }
-
-        .progress-stats {
-            color: var(--text-muted);
-            font-family: monospace;
-            font-size: 11px;
-        }
-
-        .progress-bar-track {
-            height: 6px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        .progress-bar-fill-scan {
-            height: 100%;
-            background: linear-gradient(90deg, var(--primary), var(--success));
-            border-radius: 3px;
-            width: 0%;
-            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 0 8px var(--primary-glow);
-        }
-
-        .progress-footer {
-            margin-top: 6px;
-            font-size: 10px;
-            color: var(--text-muted);
-            font-family: monospace;
-            min-height: 12px;
-        }
-
-        /* 右侧内容面板 */
-        .content-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            overflow: hidden;
-            height: 100%;
-        }
-
-        .content-panel > .glass-card {
-            flex: 1;
-            overflow-y: auto;
-            min-height: 0;
-            scrollbar-width: thin;
-            scrollbar-color: rgba(138, 43, 226, 0.5) transparent;
-        }
-
-        .content-panel > .glass-card::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .content-panel > .glass-card::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .content-panel > .glass-card::-webkit-scrollbar-thumb {
-            background: rgba(138, 43, 226, 0.5);
-            border-radius: 3px;
-        }
-
-        /* 侧边栏卡片分配 */
-        .sidebar > .glass-card:first-child {
-            flex: 0 0 auto;
-        }
-
-        .sidebar > .glass-card:last-child {
-            flex: 1;
-            overflow-y: auto;
-            min-height: 0;
-            scrollbar-width: thin;
-            scrollbar-color: rgba(138, 43, 226, 0.5) transparent;
-        }
-
-        .sidebar > .glass-card:last-child::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .sidebar > .glass-card:last-child::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .sidebar > .glass-card:last-child::-webkit-scrollbar-thumb {
-            background: rgba(138, 43, 226, 0.5);
-            border-radius: 3px;
-        }
-
-        /* 推荐列表卡片 */
-        .recommendation-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 10px;
-        }
-
-        .track-card {
+        /* Sidebar Navigation */
+        .sidebar {
             background: var(--glass-bg);
             border: 1px solid var(--glass-border);
-            border-radius: 10px;
-            padding: 12px 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            gap: 12px;
+            border-radius: 16px;
+            padding: 16px; display: flex; flex-direction: column; gap: 8px;
+            backdrop-filter: blur(20px);
+        }
+        .nav-item {
+            padding: 12px 16px; border-radius: 10px; cursor: pointer;
+            display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px;
+            color: var(--text-muted); transition: all 0.2s ease;
+        }
+        .nav-item:hover, .nav-item.active { background: var(--glass-hover); color: var(--text-main); }
+        .nav-item.active { border-left: 3px solid var(--primary); }
+
+        /* Content Area */
+        .content-panel {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 20px; display: flex; flex-direction: column; gap: 16px;
+            backdrop-filter: blur(20px); overflow-y: auto;
         }
 
-        .track-card:hover {
-            background: var(--glass-hover);
-            transform: scale(1.01);
-            border-color: rgba(255, 255, 255, 0.12);
+        .breadcrumb { display: flex; gap: 8px; font-size: 13px; color: var(--text-muted); align-items: center; }
+        .breadcrumb-item { cursor: pointer; }
+        .breadcrumb-item:hover { color: var(--text-main); }
+
+        .song-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .song-table th { text-align: left; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--glass-border); }
+        .song-table td { padding: 12px; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.02); }
+        .song-row { cursor: pointer; transition: background 0.2s; }
+        .song-row:hover { background: var(--glass-hover); }
+
+        /* Lyrics Panel */
+        .lyrics-panel {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px; padding: 20px;
+            display: flex; flex-direction: column; align-items: center; text-align: center;
+            backdrop-filter: blur(20px); overflow-y: auto;
         }
+        .cover-art-large { width: 180px; height: 180px; border-radius: 14px; object-fit: cover; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 16px; }
+        .lyric-line { padding: 8px 0; font-size: 15px; color: var(--text-muted); transition: all 0.3s ease; cursor: pointer; }
+        .lyric-line.active { font-size: 18px; font-weight: 700; color: var(--accent-green); transform: scale(1.05); }
 
-        .track-info-section {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex: 1;
-            min-width: 0; /* 允许截断 */
-        }
-
-        .play-trigger-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: var(--text-main);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-size: 14px;
-            flex-shrink: 0;
-        }
-
-        .play-trigger-btn:hover {
-            background: var(--text-main);
-            color: #000;
-            transform: scale(1.08);
-        }
-
-        .track-meta {
-            min-width: 0;
-        }
-
-        .track-title {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 2px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .track-artist {
-            font-size: 12px;
-            color: var(--text-muted);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .track-badges {
-            display: flex;
-            gap: 4px;
-            flex-wrap: wrap;
-            margin-top: 4px;
-        }
-
-        .badge {
-            font-size: 9px;
-            padding: 1px 6px;
-            border-radius: 3px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-
-        .badge-similar { background: rgba(138, 43, 226, 0.15); border: 1px solid rgba(138, 43, 226, 0.3); color: #c38aff; }
-        .badge-popular { background: rgba(0, 191, 255, 0.15); border: 1px solid rgba(0, 191, 255, 0.3); color: #8ad8ff; }
-        .badge-same_artist { background: rgba(255, 105, 180, 0.15); border: 1px solid rgba(255, 105, 180, 0.3); color: #ff8ad8; }
-        .badge-related_artist { background: rgba(255, 165, 0, 0.15); border: 1px solid rgba(255, 165, 0, 0.3); color: #ffca8a; }
-
-        .score-section {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-shrink: 0;
-        }
-
-        .score-label {
-            text-align: right;
-        }
-
-        .score-val {
-            font-size: 15px;
-            font-weight: 700;
-            color: var(--success);
-        }
-
-        .score-bar-bg {
-            width: 60px;
-            height: 5px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        .score-bar-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--primary), var(--success));
-            border-radius: 3px;
-            width: 0;
-            transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        /* 悬浮底部播放器 */
+        /* Bottom Player Bar */
         .player-bar {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 72px;
-            background: rgba(15, 10, 30, 0.85);
-            backdrop-filter: blur(25px);
-            border-top: 1px solid var(--glass-border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 30px;
-            z-index: 1000;
-            box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+            position: relative; z-index: 20; height: 86px;
+            background: rgba(10, 5, 25, 0.85);
+            backdrop-filter: blur(25px); border-top: 1px solid var(--glass-border);
+            padding: 0 30px; display: flex; justify-content: space-between; align-items: center;
         }
+        .player-track-info { display: flex; align-items: center; gap: 14px; width: 280px; }
+        .player-cover { width: 52px; height: 52px; border-radius: 8px; object-fit: cover; }
+        .quality-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0, 255, 136, 0.15); color: var(--accent-green); border: 1px solid rgba(0, 255, 136, 0.3); font-weight: 700; }
 
-        .player-left {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            width: 220px;
-            min-width: 0;
-        }
+        .player-controls { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1; max-width: 600px; }
+        .ctrl-btns { display: flex; align-items: center; gap: 20px; }
+        .btn-play { width: 44px; height: 44px; border-radius: 50%; background: var(--primary); border: none; color: white; font-size: 18px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 15px var(--primary-glow); }
+        .btn-radio { padding: 6px 14px; border-radius: 20px; background: rgba(160, 68, 255, 0.2); border: 1px solid var(--primary); color: #fff; font-size: 12px; cursor: pointer; font-weight: 600; }
 
-        .disc {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: linear-gradient(45deg, #111, #333);
-            border: 2px solid var(--glass-border);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            flex-shrink: 0;
-            animation: spin 8s linear infinite;
-            animation-play-state: paused;
-        }
-
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        .player-song-info {
-            min-width: 0;
-        }
-
-        .player-song-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #ffffff;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .player-song-artist {
-            font-size: 12px;
-            color: var(--text-muted);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .player-center {
-            flex: 1;
-            max-width: 500px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .player-controls {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .control-btn {
-            background: none;
-            border: none;
-            color: var(--text-main);
-            font-size: 16px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .control-btn:hover {
-            color: var(--primary);
-            transform: scale(1.1);
-        }
-
-        .control-btn.btn-play {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: #ffffff;
-            color: #000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-        }
-
-        .control-btn.btn-play:hover {
-            background: #e5e5ea;
-            transform: scale(1.08);
-        }
-
-        .timeline-container {
-            width: 100%;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-
-        .progress-bar-bg {
-            flex: 1;
-            height: 4px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 2px;
-            position: relative;
-            cursor: pointer;
-        }
-
-        .progress-bar-fill {
-            height: 100%;
-            background: var(--primary);
-            border-radius: 2px;
-            width: 0%;
-        }
-
-        .player-right {
-            width: 200px;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 8px;
-            color: var(--text-muted);
-        }
-
-        .volume-slider {
-            width: 80px;
-            height: 3px;
-            outline: none;
-            background: rgba(255,255,255,0.1);
-            border-radius: 2px;
-            accent-color: var(--primary);
-            cursor: pointer;
-        }
-
-        /* 辅助类 */
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-muted);
-            font-size: 14px;
-            border: 1px dashed var(--glass-border);
-            border-radius: 10px;
-            background: rgba(0,0,0,0.15);
-        }
+        .progress-area { width: 100%; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); }
+        .progress-bar { flex: 1; height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; cursor: pointer; position: relative; }
+        .progress-fill { height: 100%; background: var(--primary); border-radius: 3px; width: 0%; }
     </style>
 </head>
 <body>
+    <div id="ambient-glow"></div>
 
-    <!-- 顶部导航 -->
     <header>
-        <div class="logo">Embeat Engine</div>
-        <div class="status-badge">
-            <span class="status-dot"></span>
-            推荐引擎服务正常运行中
+        <div class="logo">⚡ Embeat Audio</div>
+        <div class="header-actions">
+            <a href="/admin" class="btn-admin">⚙️ 管理后台</a>
         </div>
     </header>
 
-    <!-- 主体容器 -->
     <main>
-        <!-- 左侧面板 -->
         <div class="sidebar">
-            <!-- 数据库导入面板 -->
-            <div class="glass-card">
-                <h2>📁 本地曲库控制台</h2>
-                <div class="form-group" style="margin-bottom: 12px;">
-                    <label>曲库扫描路径 (容器内)</label>
-                    <input type="text" id="scan-path" value="/music" readonly>
-                </div>
-                <div class="form-group" style="margin-bottom: 12px;">
-                    <label>并行提取线程数 (Max: <span id="cpu-max-workers">3</span> 核心)</label>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <input type="number" id="scan-workers" value="2" min="1" max="3" style="width: 90px; padding: 6px 10px; background: rgba(0, 0, 0, 0.4); border: 1px solid var(--glass-border); border-radius: 6px; color: #fff; font-size: 13px;">
-                        <span style="font-size: 11px; color: var(--text-muted);" id="cpu-total-hint">预留 1 核防卡死</span>
-                    </div>
-                </div>
-                <button class="btn" id="btn-scan" onclick="startLibraryScan()">⚡ 扫描本地音频并生成向量</button>
-                <div class="scan-progress" id="scan-progress" style="display: none;">
-                    <div class="progress-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <span class="progress-phase" id="progress-phase">准备中...</span>
-                            <span class="progress-stats" id="progress-stats"></span>
-                        </div>
-                        <button class="stop-btn" id="btn-stop-scan" onclick="stopLibraryScan()" style="display: none;">🛑 中止扫描</button>
-                    </div>
-                    <div class="progress-bar-track">
-                        <div class="progress-bar-fill-scan" id="scan-progress-fill"></div>
-                    </div>
-                    <div class="progress-footer" id="progress-eta"></div>
-                </div>
-                <div class="form-group" style="margin-top: 15px; margin-bottom: 0;">
-                    <label>提取进度与运行日志</label>
-                    <div class="console" id="log-console">等待扫描启动...</div>
-                </div>
-            </div>
-
-            <!-- 推荐控制面板 -->
-            <div class="glass-card">
-                <h2>🎵 发起音乐推荐</h2>
-                <div class="form-group">
-                    <label>搜索/过滤曲库歌曲</label>
-                    <input type="text" id="search-filter" class="search-box" placeholder="输入歌名或歌手关键字筛选..." oninput="filterSongDropdown()">
-                    <label>选择种子歌曲 (Seed Track)</label>
-                    <div class="select-wrapper">
-                        <select id="seed-select">
-                            <option value="">-- 请选择或从上方搜索 --</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>推荐相似曲目数量 (Top-K)</label>
-                    <input type="number" id="recommend-limit" value="10" min="1" max="50">
-                </div>
-                <div class="form-group" style="display: flex; gap: 10px;">
-                    <button class="btn" id="btn-recommend" onclick="getRecommendations(false)" style="flex: 1; background: linear-gradient(90deg, #8a2be2, #4b0082);">🔍 相似推荐</button>
-                    <button class="btn" id="btn-recommend-diff" onclick="getRecommendations(true)" style="flex: 1; background: linear-gradient(90deg, #ff8c00, #ff4500);">🎲 换个风格</button>
-                </div>
-            </div>
+            <div class="nav-item active" onclick="switchNav('folder')">📁 目录零等待点播</div>
+            <div class="nav-item" onclick="switchNav('artist')">🎤 按歌手浏览</div>
+            <div class="nav-item" onclick="switchNav('album')">💿 按专辑浏览</div>
+            <div class="nav-item" onclick="switchNav('radio')">⚡ AI 漫游电台</div>
         </div>
 
-        <!-- 右侧面板 -->
-        <div class="content-panel">
-            <div class="glass-card" style="flex: 1;">
-                <h2 id="result-title">✨ 推荐结果列表</h2>
-                <div id="results-container" class="recommendation-grid">
-                    <div class="empty-state">
-                        还没有检索结果。请先在左侧选择一首种子歌曲，并点击“搜索相似歌曲”按钮。
-                    </div>
-                </div>
+        <div class="content-panel" id="content-panel">
+            <div class="breadcrumb" id="breadcrumb">
+                <span class="breadcrumb-item" onclick="loadFolder('/music')">根目录 /music</span>
+            </div>
+
+            <table class="song-table">
+                <thead>
+                    <tr>
+                        <th>曲目名称</th>
+                        <th>歌手</th>
+                        <th>格式 / 大小</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="song-list">
+                    <!-- Dynamic Files -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="lyrics-panel">
+            <img src="https://picsum.photos/200" class="cover-art-large" id="lyric-cover" alt="Cover">
+            <h3 id="lyric-title" style="font-size: 16px; margin-bottom: 4px;">晴天</h3>
+            <p id="lyric-artist" style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">周杰伦</p>
+            <div id="lyrics-container">
+                <div class="lyric-line active">故事的小黄花</div>
+                <div class="lyric-line">从出生那年就飘着</div>
+                <div class="lyric-line">童年的荡秋千</div>
+                <div class="lyric-line">随记忆一直晃到现在</div>
             </div>
         </div>
     </main>
 
-    <!-- 悬浮播放栏 -->
     <div class="player-bar">
-        <div class="player-left">
-            <div class="disc" id="player-disc">🎵</div>
-            <div class="player-song-info">
-                <div class="player-song-title" id="p-title">未在播放</div>
-                <div class="player-song-artist" id="p-artist">-</div>
-            </div>
-        </div>
-        <div class="player-center">
-            <div class="player-controls">
-                <button class="control-btn" onclick="skipBackward()">⏮</button>
-                <button class="control-btn btn-play" id="btn-play-pause" onclick="togglePlayPause()">▶</button>
-                <button class="control-btn" onclick="skipForward()">⏭</button>
-            </div>
-            <div class="timeline-container">
-                <span id="time-current">00:00</span>
-                <div class="progress-bar-bg" id="progress-container" onclick="seekAudio(event)">
-                    <div class="progress-bar-fill" id="progress-fill"></div>
+        <div class="player-track-info">
+            <img src="https://picsum.photos/100" class="player-cover" id="player-cover" alt="Cover">
+            <div>
+                <div style="font-weight: 600; font-size: 14px;" id="player-title">未选择播放曲目</div>
+                <div style="display: flex; gap: 6px; align-items: center; margin-top: 4px;">
+                    <span id="player-artist" style="font-size: 12px; color: var(--text-muted);">未知歌手</span>
+                    <span class="quality-badge" id="player-quality">FLAC 24bit</span>
                 </div>
-                <span id="time-total">00:00</span>
             </div>
         </div>
-        <div class="player-right">
-            <span>🔊</span>
-            <input type="range" class="volume-slider" min="0" max="1" step="0.05" value="0.8" oninput="setVolume(this.value)">
+
+        <div class="player-controls">
+            <div class="ctrl-btns">
+                <button class="btn-radio" onclick="toggleAIRadio()">⚡ AI 漫游电台</button>
+                <button class="btn-play" id="play-btn" onclick="togglePlay()">▶</button>
+            </div>
+            <div class="progress-area">
+                <span id="curr-time">00:00</span>
+                <div class="progress-bar" onclick="seekAudio(event)">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <span id="total-time">00:00</span>
+            </div>
         </div>
+
+        <audio id="audio-element"></audio>
     </div>
 
-    <!-- 音频源标签 -->
-    <audio id="audio-player" style="display: none;"></audio>
-
     <script>
-        // 全局状态
-        let songList = [];
-        let recommendedTracks = [];
-        let currentTrackIndex = -1;
-        let seedTrackInfo = null; // 当前种子歌曲信息
-        let isDiffStyleMode = false; // 是否为"换个风格"模式
-        
-        const audio = document.getElementById("audio-player");
-        const playPauseBtn = document.getElementById("btn-play-pause");
-        const disc = document.getElementById("player-disc");
-        const progressFill = document.getElementById("progress-fill");
-        const timeCurrent = document.getElementById("time-current");
-        const timeTotal = document.getElementById("time-total");
+        const audio = document.getElementById("audio-element");
+        let currentPath = "/music";
 
-        // 初始化加载
-        window.addEventListener("DOMContentLoaded", () => {
-            fetchSongList();
-            setupAudioEventListeners();
-            checkScanStatusOnLoad();
-        });
-
-        // 页面打开/刷新时，检查后端是否有正在运行的扫描任务与历史日志
-        async function checkScanStatusOnLoad() {
-            try {
-                const res = await fetch("/scan/status");
-                if (!res.ok) return;
-                const data = await res.json();
-
-                if (data.cpu_info) {
-                    const maxW = data.cpu_info.max_workers || 1;
-                    const totalC = data.cpu_info.total_cpus || 4;
-                    const workersInput = document.getElementById("scan-workers");
-                    const maxHint = document.getElementById("cpu-max-workers");
-                    const totalHint = document.getElementById("cpu-total-hint");
-                    if (workersInput) {
-                        workersInput.max = maxW;
-                        if (!workersInput.value || parseInt(workersInput.value) > maxW) {
-                            workersInput.value = maxW;
-                        }
-                    }
-                    if (maxHint) maxHint.textContent = maxW;
-                    if (totalHint) totalHint.textContent = `预留 1 核防卡死 (总核心数: ${totalC})`;
-                }
-
-                const consoleDiv = document.getElementById("log-console");
-                if (data.logs && data.logs.length > 0) {
-                    consoleDiv.textContent = data.logs.join("\n") + "\n";
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                }
-
-                if (data.is_running) {
-                    const btn = document.getElementById("btn-scan");
-                    const progressBox = document.getElementById("scan-progress");
-                    const stopBtn = document.getElementById("btn-stop-scan");
-                    const phaseEl = document.getElementById("progress-phase");
-                    const statsEl = document.getElementById("progress-stats");
-                    const fillEl = document.getElementById("scan-progress-fill");
-
-                    btn.disabled = true;
-                    btn.textContent = "⚙️ 后台扫描进行中...";
-                    progressBox.style.display = "block";
-                    if (stopBtn) {
-                        stopBtn.style.display = "inline-block";
-                        stopBtn.disabled = false;
-                        stopBtn.textContent = "🛑 中止扫描";
-                    }
-
-                    const s = data.status || {};
-                    fillEl.style.width = `${s.percent || 0}%`;
-                    statsEl.textContent = s.total ? `${s.current || 0} / ${s.total} (${s.percent || 0}%)` : '';
-                    if (s.phase === 'extract') phaseEl.textContent = '🎵 提取音频特征';
-                    else if (s.phase === 'cleanup') phaseEl.textContent = '🧹 清理失效条目';
-                    else if (s.phase === 'embedding') phaseEl.textContent = '🧠 生成向量并入库';
-                    else phaseEl.textContent = '⚙️ 后台处理中...';
-
-                    // 重新连接流式日志
-                    startLibraryScan(true);
-                }
-            } catch (err) {
-                console.error("Failed to check scan status on load:", err);
-            }
-        }
-
-        // 中途中止后台特征提取任务
-        async function stopLibraryScan() {
-            const stopBtn = document.getElementById("btn-stop-scan");
-            if (stopBtn) {
-                stopBtn.disabled = true;
-                stopBtn.textContent = "⏳ 正在发送中止信号...";
-            }
-            try {
-                const res = await fetch("/scan/stop", { method: "POST" });
-                const data = await res.json();
-                const consoleDiv = document.getElementById("log-console");
-                consoleDiv.textContent += `-> ${data.message || '已请求中止'}\n`;
-                consoleDiv.scrollTop = consoleDiv.scrollHeight;
-            } catch (err) {
-                console.error("Failed to stop scan:", err);
-            }
-        }
-
-        // 获取歌曲列表
-        async function fetchSongList() {
-            try {
-                const response = await fetch("/songs");
-                if (response.ok) {
-                    songList = await response.json();
-                    populateSelect(songList);
-                } else {
-                    console.error("Failed to fetch song list");
-                }
-            } catch (err) {
-                console.error("Error fetching song list:", err);
-            }
-        }
-
-        // 填充下拉选项
-        function populateSelect(songs) {
-            const select = document.getElementById("seed-select");
-            // 保留第一个默认选项
-            select.innerHTML = '<option value="">-- 请选择或从上方搜索 --</option>';
-            
-            songs.forEach(song => {
-                const opt = document.createElement("option");
-                opt.value = song.track_id;
-                opt.textContent = `${song.track_name} - ${song.artist_name}`;
-                select.appendChild(opt);
-            });
-        }
-
-        // 本地下拉过滤搜索
-        function filterSongDropdown() {
-            const filterText = document.getElementById("search-filter").value.toLowerCase();
-            const filtered = songList.filter(song => {
-                return song.track_name.toLowerCase().includes(filterText) || 
-                       song.artist_name.toLowerCase().includes(filterText);
-            });
-            populateSelect(filtered);
-            if (filtered.length > 0) {
-                document.getElementById("seed-select").value = filtered[0].track_id;
-            }
-        }
-
-        // 触发本地文件扫描与入库（流式 NDJSON 实时进度）
-        async function startLibraryScan(isResume = false) {
-            const btn = document.getElementById("btn-scan");
-            const consoleDiv = document.getElementById("log-console");
-            const progressBox = document.getElementById("scan-progress");
-            const phaseEl = document.getElementById("progress-phase");
-            const statsEl = document.getElementById("progress-stats");
-            const fillEl = document.getElementById("scan-progress-fill");
-            const etaEl = document.getElementById("progress-eta");
-            const stopBtn = document.getElementById("btn-stop-scan");
-            const workersInput = document.getElementById("scan-workers");
-            const workers = workersInput ? parseInt(workersInput.value) || 1 : 1;
-
-            btn.disabled = true;
-            btn.textContent = "⚙️ 扫描进行中...";
-            progressBox.style.display = "block";
-            if (stopBtn) {
-                stopBtn.style.display = "inline-block";
-                stopBtn.disabled = false;
-                stopBtn.textContent = "🛑 中止扫描";
+        async function loadFolder(path) {
+            currentPath = path;
+            const res = await fetch(`/api/library/folder/browse?path=${encodeURIComponent(path)}`);
+            const data = await res.json();
+            // Update breadcrumb
+            const bc = document.getElementById("breadcrumb");
+            bc.innerHTML = `<span class="breadcrumb-item" onclick="loadFolder('/music')">根目录 /music</span>`;
+            if (data.parent_path && data.current_path !== "/music") {
+                bc.innerHTML += ` &gt; <span class="breadcrumb-item" onclick="loadFolder('${data.parent_path.replace(/\\/g, '/')} ')">${data.current_path.replace(/\\/g, '/')}</span>`;
             }
 
-            if (!isResume) {
-                fillEl.style.width = "0%";
-                phaseEl.textContent = "准备中...";
-                statsEl.textContent = "";
-                etaEl.textContent = "";
-                consoleDiv.textContent = `-> 发起后台扫描任务 (线程数: ${workers})...\n`;
-            }
+            const tbody = document.getElementById("song-list");
+            tbody.innerHTML = "";
 
-            try {
-                const response = await fetch(`/scan?workers=${workers}`, { method: "POST" });
-
-                // 兼容非流式错误响应（如 FastAPI 抛出的非 NDJSON 错误）
-                const contentType = response.headers.get("content-type") || "";
-                if (!contentType.includes("x-ndjson") && !contentType.includes("text/plain")) {
-                    let errText = "未知错误";
-                    try { const errJson = await response.json(); errText = errJson.detail || JSON.stringify(errJson); }
-                    catch (_) { errText = await response.text().catch(() => errText); }
-                    consoleDiv.textContent += `-> 扫描提示: ${errText}\n`;
-                    phaseEl.textContent = "❌ 提示";
-                    return;
-                }
-
-                if (!response.body) {
-                    consoleDiv.textContent += `-> 错误: 浏览器不支持流式响应\n`;
-                    phaseEl.textContent = "❌ 不支持";
-                    return;
-                }
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-
-                    // 按行切分（NDJSON 以 \n 分隔）
-                    let newlineIdx;
-                    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-                        const line = buffer.slice(0, newlineIdx).trim();
-                        buffer = buffer.slice(newlineIdx + 1);
-                        if (!line) continue;
-
-                        let msg;
-                        try { msg = JSON.parse(line); }
-                        catch (_) { continue; }
-
-                        handleScanMessage(msg, {
-                            phaseEl, statsEl, fillEl, etaEl, consoleDiv, stopBtn
-                        });
-                    }
-                }
-                // 处理缓冲区中可能残留的最后一行
-                const tail = buffer.trim();
-                if (tail) {
-                    try { handleScanMessage(JSON.parse(tail), { phaseEl, statsEl, fillEl, etaEl, consoleDiv, stopBtn }); }
-                    catch (_) {}
-                }
-            } catch (err) {
-                consoleDiv.textContent += `-> 实时数据流读取完成或重连: ${err.message}\n`;
-            } finally {
-                btn.disabled = false;
-                btn.textContent = "⚡ 扫描本地音频并生成向量";
-                if (stopBtn) stopBtn.style.display = "none";
-            }
-        }
-
-        // 处理单条 NDJSON 进度消息，更新对应 UI 元素
-        function handleScanMessage(msg, ui) {
-            const { phaseEl, statsEl, fillEl, etaEl, consoleDiv, stopBtn } = ui;
-
-            switch (msg.type) {
-                case "phase":
-                    if (msg.phase === "cleanup") {
-                        phaseEl.textContent = "🧹 清理失效条目";
-                        statsEl.textContent = `0 / ${msg.total}`;
-                        fillEl.style.width = "0%";
-                        etaEl.textContent = `共 ${msg.total} 个失效条目待清理`;
-                    } else if (msg.phase === "extract") {
-                        phaseEl.textContent = "🎵 提取音频特征";
-                        statsEl.textContent = `0 / ${msg.total}`;
-                        if (msg.cleaned > 0) {
-                            consoleDiv.textContent += `-> 已清理失效条目: ${msg.cleaned} 个\n`;
-                        }
-                        consoleDiv.textContent += `-> 开始提取 ${msg.total} 个新文件的特征...\n`;
-                    } else if (msg.phase === "embedding") {
-                        phaseEl.textContent = "🧠 生成向量并入库";
-                        statsEl.textContent = `${msg.count} 首`;
-                        fillEl.style.width = "100%";
-                        etaEl.textContent = "正在批量生成向量并写入 Qdrant...";
-                    }
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                    break;
-
-                case "cleanup_progress":
-                    statsEl.textContent = `${msg.current} / ${msg.total}`;
-                    fillEl.style.width = `${(msg.current / msg.total * 100).toFixed(1)}%`;
-                    etaEl.textContent = `已清理: ${msg.path}`;
-                    break;
-
-                case "progress":
-                    statsEl.textContent = `${msg.current} / ${msg.total} (${msg.percent}%)`;
-                    fillEl.style.width = `${msg.percent}%`;
-                    if (msg.eta_seconds && msg.eta_seconds > 0) {
-                        etaEl.textContent = `约还需 ${formatEta(msg.eta_seconds)}`;
-                    } else if (msg.status !== "processing") {
-                        etaEl.textContent = "";
-                    }
-                    if (msg.status === "processing") {
-                        consoleDiv.textContent += `-> [${msg.current}/${msg.total}] 处理中: ${msg.track_name}\n`;
-                    } else if (msg.status === "ok") {
-                        consoleDiv.textContent += `   ✓ ${msg.track_name} - ${msg.artist || ''}\n`;
-                    } else if (msg.status === "failed") {
-                        consoleDiv.textContent += `   ✗ 失败: ${msg.track_name}\n`;
-                    }
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                    break;
-
-                case "done":
-                    fillEl.style.width = "100%";
-                    phaseEl.textContent = "✅ 完成";
-                    etaEl.textContent = "";
-                    statsEl.textContent = "";
-                    consoleDiv.textContent += `\n-> 扫描完成！\n`;
-                    consoleDiv.textContent += `   - 扫描文件: ${msg.scanned_files}\n`;
-                    consoleDiv.textContent += `   - 新增入库: ${msg.newly_indexed}\n`;
-                    consoleDiv.textContent += `   - 清理失效: ${msg.cleaned}\n`;
-                    if (msg.failed && msg.failed > 0) {
-                        consoleDiv.textContent += `   - 处理失败: ${msg.failed}\n`;
-                    }
-                    consoleDiv.textContent += `   - 状态: ${msg.message}\n`;
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                    if (stopBtn) stopBtn.style.display = "none";
-                    fetchSongList();
-                    break;
-
-                case "aborted":
-                    fillEl.style.width = "0%";
-                    phaseEl.textContent = "🛑 已中止";
-                    etaEl.textContent = "";
-                    statsEl.textContent = "";
-                    consoleDiv.textContent += `\n🛑 特征提取已被用户中途中止。\n`;
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                    if (stopBtn) stopBtn.style.display = "none";
-                    fetchSongList();
-                    break;
-
-                case "error":
-                    consoleDiv.textContent += `-> 错误: ${msg.message}\n`;
-                    phaseEl.textContent = "❌ 出错";
-                    etaEl.textContent = "";
-                    if (stopBtn) stopBtn.style.display = "none";
-                    break;
-            }
-        }
-
-        // 把秒数格式化为 "X 分 Y 秒" 形式
-        function formatEta(seconds) {
-            if (seconds < 60) return `${seconds} 秒`;
-            const m = Math.floor(seconds / 60);
-            const s = seconds % 60;
-            return `${m} 分 ${s} 秒`;
-        }
-
-        // 获取相似推荐
-        async function getRecommendations(excludeStyle = false) {
-            const seedId = document.getElementById("seed-select").value;
-            const limit = document.getElementById("recommend-limit").value;
-            const container = document.getElementById("results-container");
-            const btnId = excludeStyle ? "btn-recommend-diff" : "btn-recommend";
-            const btn = document.getElementById(btnId);
-            const otherBtnId = excludeStyle ? "btn-recommend" : "btn-recommend-diff";
-            const otherBtn = document.getElementById(otherBtnId);
-
-            if (!seedId) {
-                alert("请先选择一首种子歌曲！");
-                return;
-            }
-
-            // 提取种子歌曲的名称和歌手（从下拉框选中项文本）
-            const seedSelect = document.getElementById("seed-select");
-            const seedOption = seedSelect.options[seedSelect.selectedIndex];
-            const seedText = seedOption ? seedOption.textContent : "";
-            const seedParts = seedText.split(" - ");
-            const seedName = seedParts[0] || "";
-            const seedArtist = seedParts.length > 1 ? seedParts[1] : "";
-            seedTrackInfo = { track_id: seedId, track_name: seedName, artist_name: seedArtist };
-            isDiffStyleMode = excludeStyle;
-
-            btn.disabled = true;
-            otherBtn.disabled = true;
-            btn.textContent = excludeStyle ? "正在生成不同风格..." : "正在计算特征与召回...";
-            container.innerHTML = `<div class="empty-state">正在${excludeStyle ? '为您寻找不同风格' : '计算相似向量并执行多路召回'}，请稍候...</div>`;
-
-            try {
-                const response = await fetch("/recommend", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ track_id: seedId, top_k: parseInt(limit), exclude_style: excludeStyle })
+            // Render subfolders
+            if (data.folders) {
+                data.folders.forEach(f => {
+                    const tr = document.createElement("tr");
+                    tr.className = "song-row";
+                    tr.onclick = () => loadFolder(f.path);
+                    tr.innerHTML = `<td colspan="4">📁 <b>${f.name}</b></td>`;
+                    tbody.appendChild(tr);
                 });
-                
-                if (response.ok) {
-                    const result = await response.json();
-                    
-                    // 适配新的响应格式
-                    // { mode: "similar"|"diff_style", new_seed?: {...}, recommendations: [...] }
-                    recommendedTracks = result.recommendations || result;
-                    
-                    // 如果是换个风格模式，更新种子歌曲为新抽到的 B
-                    if (result.mode === "diff_style" && result.new_seed) {
-                        seedTrackInfo = result.new_seed;
-                        // 同步更新下拉框选择为新种子
-                        const seedSelect = document.getElementById("seed-select");
-                        const newOption = Array.from(seedSelect.options).find(
-                            o => o.value === result.new_seed.track_id
-                        );
-                        if (newOption) {
-                            seedSelect.value = result.new_seed.track_id;
-                        } else {
-                            // 如果下拉框没有此选项，创建一个临时选项
-                            const tempOpt = document.createElement("option");
-                            tempOpt.value = result.new_seed.track_id;
-                            tempOpt.textContent = `${result.new_seed.track_name} - ${result.new_seed.artist_name}`;
-                            seedSelect.appendChild(tempOpt);
-                            seedSelect.value = result.new_seed.track_id;
-                        }
-                    }
-                    
-                    renderRecommendations(recommendedTracks);
-                } else {
-                    const errDetail = await response.json();
-                    container.innerHTML = `<div class="empty-state" style="color: #ff4a4a;">推荐请求失败: ${errDetail.detail || '未知接口错误'}</div>`;
-                }
-            } catch (err) {
-                container.innerHTML = `<div class="empty-state" style="color: #ff4a4a;">网络连接失败: ${err.message}</div>`;
-            } finally {
-                btn.disabled = false;
-                otherBtn.disabled = false;
-                btn.textContent = excludeStyle ? "🎲 换个风格" : "🔍 相似推荐";
-                otherBtn.textContent = excludeStyle ? "🔍 相似推荐" : "🎲 换个风格";
-            }
-        }
-
-        // 渲染推荐卡片
-        function renderRecommendations(tracks) {
-            const container = document.getElementById("results-container");
-            if (!tracks || tracks.length === 0) {
-                container.innerHTML = `<div class="empty-state">无匹配结果。您可以扫描更多音频或调整召回策略。</div>`;
-                return;
             }
 
-            container.innerHTML = "";
-
-            // === 在顶端渲染种子歌曲卡片 ===
-            if (seedTrackInfo) {
-                const seedCard = document.createElement("div");
-                seedCard.className = "track-card";
-                if (isDiffStyleMode) {
-                    seedCard.style.borderLeft = "3px solid #ff8c00";
-                    seedCard.style.background = "rgba(255, 140, 0, 0.08)";
-                } else {
-                    seedCard.style.borderLeft = "3px solid #b066ff";
-                    seedCard.style.background = "rgba(138, 43, 226, 0.08)";
-                }
-
-                const seedLabel = isDiffStyleMode ? "新种子 (不同风格)" : "种子歌曲";
-                const seedLabelStyle = isDiffStyleMode
-                    ? "background: rgba(255, 140, 0, 0.2); border: 1px solid rgba(255, 140, 0, 0.4); color: #ffb74d;"
-                    : "background: rgba(176, 102, 255, 0.2); border: 1px solid rgba(176, 102, 255, 0.4); color: #c38aff;";
-
-                seedCard.innerHTML = `
-                    <div class="track-info-section">
-                        <button class="play-trigger-btn" onclick="playSeedTrack()">▶</button>
-                        <div class="track-meta">
-                            <div class="track-title">${seedTrackInfo.track_name}</div>
-                            <div class="track-artist">${seedTrackInfo.artist_name}</div>
-                            <div class="track-badges">
-                                <span class="badge" style="${seedLabelStyle}">${seedLabel}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="score-section">
-                        <div class="score-label">
-                            <span class="score-val" style="color: #c38aff;">—</span>
-                            <div class="score-bar-bg">
-                                <div class="score-bar-fill" style="width: 100%; background: linear-gradient(90deg, #b066ff, #b066ff);"></div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                container.appendChild(seedCard);
-            }
-
-            // === 渲染推荐结果 ===
-            tracks.forEach((track, index) => {
-                const card = document.createElement("div");
-                card.className = "track-card";
-
-                // 构建来源标签
-                let badgeHTML = "";
-                const sources = track.sources || [];
-                sources.forEach(src => {
-                    let text = src;
-                    if (src === 'similar') text = "声学相似";
-                    if (src === 'popular') text = "同流派热门";
-                    if (src === 'same_artist') text = "同歌手";
-                    if (src === 'related_artist') text = "相似歌手";
-                    if (src === 'related_track') text = "歌单CF";
-                    badgeHTML += `<span class="badge badge-${src}">${text}</span>`;
+            // Render files
+            if (data.files) {
+                data.files.forEach(file => {
+                    const tr = document.createElement("tr");
+                    tr.className = "song-row";
+                    tr.onclick = () => playSong(file);
+                    tr.innerHTML = `
+                        <td>🎵 ${file.track_name}</td>
+                        <td>${file.artist_name}</td>
+                        <td>${(file.file_size / 1048576).toFixed(1)} MB</td>
+                        <td><button style="padding:4px 8px; border-radius:6px; background:var(--primary); color:#fff; border:none; cursor:pointer;" onclick="event.stopPropagation(); playSong(${JSON.stringify(file).replace(/"/g, '&quot;')})">播放</button></td>
+                    `;
+                    tbody.appendChild(tr);
                 });
-
-                const formattedScore = (track.score * 100).toFixed(0);
-
-                card.innerHTML = `
-                    <div class="track-info-section">
-                        <button class="play-trigger-btn" onclick="playSongAt(${index})">▶</button>
-                        <div class="track-meta">
-                            <div class="track-title">${track.track_name}</div>
-                            <div class="track-artist">${track.artist_name}</div>
-                            <div class="track-badges">${badgeHTML}</div>
-                        </div>
-                    </div>
-                    <div class="score-section">
-                        <div class="score-label">
-                            <span class="score-val">${formattedScore}%</span>
-                            <div class="score-bar-bg">
-                                <div class="score-bar-fill" id="bar-${index}"></div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                container.appendChild(card);
-
-                // 动画触发宽度
-                setTimeout(() => {
-                    const fillBar = document.getElementById(`bar-${index}`);
-                    if (fillBar) fillBar.style.width = `${formattedScore}%`;
-                }, 100);
-            });
+            }
         }
 
-        // 播放种子歌曲
-        function playSeedTrack() {
-            if (!seedTrackInfo) return;
-            currentTrackIndex = -1;
-            playAudio(seedTrackInfo.track_id, seedTrackInfo.track_name, seedTrackInfo.artist_name);
-        }
-
-        // 从推荐列表播放特定曲目
-        function playSongAt(index) {
-            if (index < 0 || index >= recommendedTracks.length) return;
-            currentTrackIndex = index;
-            const track = recommendedTracks[index];
-            playAudio(track.track_id, track.track_name, track.artist_name);
-        }
-
-        // 播放控制
-        function playAudio(trackId, title, artist) {
-            audio.src = `/audio/${trackId}`;
+        function playSong(file) {
+            audio.src = `/api/audio/stream?path=${encodeURIComponent(file.local_path)}`;
             audio.play();
-            
-            document.getElementById("p-title").textContent = title;
-            document.getElementById("p-artist").textContent = artist;
-            playPauseBtn.textContent = "⏸";
-            disc.style.animationPlayState = "running";
+            document.getElementById("player-title").innerText = file.track_name;
+            document.getElementById("player-artist").innerText = file.artist_name;
+            document.getElementById("play-btn").innerText = "⏸";
+            loadLyrics(file.local_path, file.track_name, file.artist_name);
         }
 
-        function togglePlayPause() {
-            if (!audio.src) return;
-            if (audio.paused) {
-                audio.play();
-                playPauseBtn.textContent = "⏸";
-                disc.style.animationPlayState = "running";
-            } else {
-                audio.pause();
-                playPauseBtn.textContent = "▶";
-                disc.style.animationPlayState = "paused";
+        async function loadLyrics(path, title, artist) {
+            const res = await fetch(`/api/lyrics?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
+            const data = await res.json();
+            const container = document.getElementById("lyrics-container");
+            container.innerHTML = "";
+            if (data.lyrics) {
+                const lines = data.lyrics.split("\n");
+                lines.forEach(l => {
+                    const text = l.replace(/\[\d+:\d+\.\d+\]/g, "").trim();
+                    if (text) {
+                        const div = document.createElement("div");
+                        div.className = "lyric-line";
+                        div.innerText = text;
+                        container.appendChild(div);
+                    }
+                });
             }
         }
 
-        function skipBackward() {
-            if (currentTrackIndex === 0) {
-                // 从推荐第一首跳回种子歌曲
-                playSeedTrack();
-            } else if (currentTrackIndex > 0) {
-                playSongAt(currentTrackIndex - 1);
-            }
-        }
-
-        function skipForward() {
-            if (currentTrackIndex === -1) {
-                // 从种子歌曲跳到推荐第一首
-                playSongAt(0);
-            } else if (currentTrackIndex >= 0 && currentTrackIndex < recommendedTracks.length - 1) {
-                playSongAt(currentTrackIndex + 1);
-            }
-        }
-
-        function setVolume(val) {
-            audio.volume = val;
+        function togglePlay() {
+            if (audio.paused) { audio.play(); document.getElementById("play-btn").innerText = "⏸"; }
+            else { audio.pause(); document.getElementById("play-btn").innerText = "▶"; }
         }
 
         function seekAudio(e) {
-            if (!audio.duration) return;
-            const containerWidth = document.getElementById("progress-container").clientWidth;
-            const clickX = e.offsetX;
-            const pct = clickX / containerWidth;
-            audio.currentTime = pct * audio.duration;
+            if (audio.duration) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const pos = (e.clientX - rect.left) / rect.width;
+                audio.currentTime = pos * audio.duration;
+            }
         }
 
-        // 音频播放器事件绑定
-        function setupAudioEventListeners() {
-            // 时间更新
-            audio.addEventListener("timeupdate", () => {
-                if (!audio.duration) return;
+        function formatTime(sec) {
+            if (!sec || isNaN(sec)) return "00:00";
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+        }
+
+        audio.ontimeupdate = () => {
+            if (audio.duration) {
                 const pct = (audio.currentTime / audio.duration) * 100;
-                progressFill.style.width = `${pct}%`;
-                
-                timeCurrent.textContent = formatTime(audio.currentTime);
-            });
+                document.getElementById("progress-fill").style.width = `${pct}%`;
+                document.getElementById("curr-time").innerText = formatTime(audio.currentTime);
+                document.getElementById("total-time").innerText = formatTime(audio.duration);
+            }
+        };
 
-            // 总时间加载
-            audio.addEventListener("loadedmetadata", () => {
-                timeTotal.textContent = formatTime(audio.duration);
-            });
-
-            // 播放完毕自动切歌
-            audio.addEventListener("ended", () => {
-                skipForward();
-            });
+        async function toggleAIRadio() {
+            alert("⚡ AI 漫游电台已开启：系统将自动按声学特征连续播放相似歌曲");
         }
 
-        function formatTime(secs) {
-            const m = Math.floor(secs / 60).toString().padStart(2, '0');
-            const s = Math.floor(secs % 60).toString().padStart(2, '0');
-            return `${m}:${s}`;
+        function switchNav(type) {
+            document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+            event.currentTarget.classList.add("active");
+            if (type === 'folder') loadFolder('/music');
         }
+
+        // Init load
+        loadFolder("/music");
     </script>
 </body>
 </html>

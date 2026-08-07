@@ -8,8 +8,8 @@ services:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      # 直接挂载本地已有的数据库文件夹，实现向量库数据无缝继承
-      - ./storage:/qdrant/storage
+      # 可选挂载 4500万预置数据库包；若未找到，Qdrant 自动降级自建纯本地存储
+      - ./embeat_qdrant_db:/qdrant/storage
     restart: always
 
   embeat-api:
@@ -19,11 +19,13 @@ services:
       - "8000:8000"
     volumes:
       # 挂载宿主机测试音乐文件夹到容器内的 /music，供离线提取与试听
-      # 注意：checkpoints 已打包进镜像，无需挂载（挂载会覆盖镜像内文件）
       - ./测试音乐:/music
+      # 挂载 SQLite 关系数据库与刮削/去重缓存
+      - ./data:/app/data
     environment:
       - QDRANT_URL=http://qdrant:6333
       - MUSIC_DIR=/music
+      - ADMIN_PASSWORD=admin123
     depends_on:
       - qdrant
     restart: always
