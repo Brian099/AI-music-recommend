@@ -13,6 +13,7 @@
 
 import os
 import sys
+import io
 import uuid
 import re
 import json
@@ -209,6 +210,34 @@ async def stream_audio(request: Request, track_id: Optional[str] = None, path: O
         return StreamingResponse(range_generator(), status_code=206, headers=headers)
 
     return FileResponse(local_path)
+
+
+@app.get("/api/audio/cover")
+async def get_audio_cover(path: str = Query(...)):
+    """Extract embedded ID3/FLAC cover art or return cover.jpg in folder."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    folder_dir = os.path.dirname(path)
+    cover_jpg = os.path.join(folder_dir, "cover.jpg")
+    if os.path.exists(cover_jpg):
+        return FileResponse(cover_jpg)
+
+    try:
+        audio = MutagenFile(path)
+        if audio is not None:
+            if hasattr(audio, "tags") and audio.tags:
+                for key in audio.tags.keys():
+                    if key.startswith("APIC"):
+                        apic = audio.tags[key]
+                        return StreamingResponse(io.BytesIO(apic.data), media_type=apic.mime or "image/jpeg")
+            if hasattr(audio, "pictures") and audio.pictures:
+                pic = audio.pictures[0]
+                return StreamingResponse(io.BytesIO(pic.data), media_type=pic.mime or "image/jpeg")
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=404, detail="No cover found")
 
 
 # ── Hybrid Lyrics API (Local First + LDDC Fallback & Auto Save) ───────────────

@@ -269,9 +269,40 @@
         function playSong(file) {
             audio.src = `/api/audio/stream?path=${encodeURIComponent(file.local_path)}`;
             audio.play();
+
+            // Bottom player bar updates
             document.getElementById("player-title").innerText = file.track_name;
             document.getElementById("player-artist").innerText = file.artist_name;
             document.getElementById("play-btn").innerText = "⏸";
+
+            // Right-side panel updates (Title, Artist, Cover)
+            document.getElementById("lyric-title").innerText = file.track_name;
+            document.getElementById("lyric-artist").innerText = file.artist_name;
+
+            const coverUrl = `/api/audio/cover?path=${encodeURIComponent(file.local_path)}`;
+            const playerCover = document.getElementById("player-cover");
+            const lyricCover = document.getElementById("lyric-cover");
+
+            playerCover.src = coverUrl;
+            lyricCover.src = coverUrl;
+
+            const fallbackCover = "https://picsum.photos/200?random=" + Math.abs(file.track_name.length);
+            playerCover.onerror = () => { playerCover.src = fallbackCover; };
+            lyricCover.onerror = () => { lyricCover.src = fallbackCover; };
+
+            // Format quality badge update
+            const ext = file.local_path.split('.').pop().toLowerCase();
+            const badge = document.getElementById("player-quality");
+            if (ext === "flac" || ext === "wav") {
+                badge.innerText = `${ext.toUpperCase()} 真无损`;
+                badge.style.borderColor = "var(--accent-green)";
+                badge.style.color = "var(--accent-green)";
+            } else {
+                badge.innerText = `${ext.toUpperCase()} 高品质`;
+                badge.style.borderColor = "var(--accent-gold)";
+                badge.style.color = "var(--accent-gold)";
+            }
+
             loadLyrics(file.local_path, file.track_name, file.artist_name);
         }
 
