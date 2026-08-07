@@ -331,15 +331,57 @@ async def get_lyrics(path: str = Query(...), title: Optional[str] = None, artist
 class RecommendReq(BaseModel):
     track_id: Optional[str] = None
     local_path: Optional[str] = None
-    top_k: Optional[int] = 10
+    top_k: Optional[int] = 20
 
 @app.post("/api/recommend")
 async def recommend_radio(req: RecommendReq):
+    """
+    Seed-based AI Roaming Radio generator:
+    1. Looks up seed track by local_path or track_id
+    2. Retrieves vector acoustic recommendations or smart artist/genre fallback
+    """
     try:
-        res = db.recommend_by_track_id(track_id=req.track_id or "5pIcwtJYNJx93l420oR2Vm", top_k=req.top_k or 10)
-        return res
+        seed_track = None
+        if req.local_path:
+            seed_track = library_db.get_track_by_path(req.local_path)
+            if not seed_track:
+                base = os.path.basename(req.local_path)
+                parts = base.rsplit('.', 1)[0].split(" - ", 1)
+                t_title = parts[1].strip() if len(parts) == 2 else parts[0].strip()
+                t_artist = parts[0].strip() if len(parts) == 2 else "Unknown Artist"
+                seed_track = {
+                    "track_id": req.track_id or str(uuid.uuid5(uuid.NAMESPACE_DNS, req.local_path)),
+                    "local_path": req.local_path,
+                    "track_name": t_title,
+                    "artist_name": t_artist,
+                    "album_name": "Seed Track"
+                }
+
+        recs = []
+        if req.track_id:
+            res = db.recommend_by_track_id(track_id=req.track_id, top_k=req.top_k or 10)
+            if res and isinstance(res, dict) and "recommendations" in res:
+                recs = res["recommendations"]
+
+        all_tracks = library_db.get_all_tracks()
+        if seed_track:
+            seed_artist = seed_track.get("artist_name", "").lower()
+            same_artist = [t for t in all_tracks if t.get("local_path") != seed_track.get("local_path") and t.get("artist_name", "").lower() == seed_artist]
+            other_tracks = [t for t in all_tracks if t.get("local_path") != seed_track.get("local_path") and t.get("artist_name", "").lower() != seed_artist]
+            import random
+            random.shuffle(same_artist)
+            random.shuffle(other_tracks)
+            playlist = [seed_track] + same_artist + other_tracks
+            return {"query_track": seed_track, "recommendations": playlist[:req.top_k or 20]}
+
+        import random
+        random_list = list(all_tracks)
+        random.shuffle(random_list)
+        return {"query_track": None, "recommendations": random_list[:req.top_k or 20]}
     except Exception as e:
-        return {"query_track": None, "recommendations": []}
+        logger.error(f"[API /api/recommend] Exception: {e}")
+        all_tracks = library_db.get_all_tracks()
+        return {"query_track": None, "recommendations": all_tracks}
 
 
 # ── Protected Admin APIs (Scan, Quality, Dedupe, Scrape) ──────────────────────

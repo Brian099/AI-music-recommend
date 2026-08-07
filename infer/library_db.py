@@ -248,6 +248,13 @@ class LibraryDatabase:
             cursor.execute("SELECT * FROM tracks WHERE album_name = ? ORDER BY track_number, track_name;", (album_name,))
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_track_by_path(self, local_path: str) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM tracks WHERE local_path = ?;", (local_path,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def delete_track(self, local_path: str):
         with self.get_connection() as conn:
             cursor = conn.cursor()

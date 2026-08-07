@@ -161,6 +161,18 @@
         </div>
 
         <div class="content-panel" id="content-panel">
+            <div class="search-bar-wrapper" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center;">
+                <div style="position: relative; flex: 1;">
+                    <input type="text" id="search-input" placeholder="🔍 快速定位曲目/歌手... (Enter 发起 AI 漫游起播)" 
+                           oninput="filterTracksLive()" onkeyup="handleSearchKey(event)"
+                           style="width: 100%; padding: 10px 16px 10px 38px; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border); color: #fff; font-size: 13px; outline: none; transition: all 0.3s ease;">
+                    <span style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 14px; opacity: 0.6;">🔍</span>
+                </div>
+                <button class="btn-radio" onclick="playSeedAIRadioFromSearch()" style="padding: 9px 16px; border-radius: 10px; font-size: 12px; cursor: pointer; white-space: nowrap;">
+                    ⚡ AI 漫游起播
+                </button>
+            </div>
+
             <div class="breadcrumb" id="breadcrumb">
                 <span class="breadcrumb-item" onclick="loadFolder('/music')">根目录 /music</span>
             </div>
@@ -549,6 +561,66 @@
             }
         }
 
+        function filterTracksLive() {
+            const val = document.getElementById("search-input").value.trim().toLowerCase();
+            const rows = document.querySelectorAll("#song-list tr.song-row");
+            rows.forEach(tr => {
+                const text = tr.innerText.toLowerCase();
+                if (!val || text.includes(val)) {
+                    tr.style.display = "";
+                } else {
+                    tr.style.display = "none";
+                }
+            });
+        }
+
+        function handleSearchKey(e) {
+            if (e.key === "Enter") {
+                playSeedAIRadioFromSearch();
+            }
+        }
+
+        async function playSeedAIRadioFromSearch() {
+            const query = document.getElementById("search-input").value.trim();
+            let seedTrack = null;
+            if (currentPlaylist && currentPlaylist.length > 0) {
+                if (query) {
+                    seedTrack = currentPlaylist.find(f => 
+                        (f.track_name && f.track_name.toLowerCase().includes(query.toLowerCase())) || 
+                        (f.artist_name && f.artist_name.toLowerCase().includes(query.toLowerCase()))
+                    );
+                }
+                if (!seedTrack) seedTrack = currentPlaylist[0];
+            }
+
+            if (seedTrack) {
+                startSeedAIRadio(seedTrack);
+            } else {
+                alert("未在当前库中找到匹配曲目，请先在左侧选择播放列表。");
+            }
+        }
+
+        async function startSeedAIRadio(file) {
+            const bc = document.getElementById("breadcrumb");
+            bc.innerHTML = `<span class="breadcrumb-item">⚡ AI 漫游电台（种子曲目：<b>${file.track_name}</b> - ${file.artist_name}）</span>`;
+
+            try {
+                const res = await fetch("/api/recommend", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ local_path: file.local_path, top_k: 30 })
+                });
+                const data = await res.json();
+                const recs = data.recommendations || [file];
+                
+                renderTrackTable(recs);
+                playSong(file);
+            } catch (err) {
+                console.error("AI Roaming Radio error:", err);
+                playSong(file);
+            }
+        }
+
         function renderTrackTable(tracks) {
             const tbody = document.getElementById("song-list");
             tbody.innerHTML = "";
@@ -562,11 +634,15 @@
                 const tr = document.createElement("tr");
                 tr.className = "song-row";
                 tr.onclick = () => playSong(file);
+                const safeJson = JSON.stringify(file).replace(/"/g, '&quot;');
                 tr.innerHTML = `
                     <td>🎵 ${file.track_name}</td>
                     <td>${file.artist_name}</td>
                     <td>${file.file_size ? (file.file_size / 1048576).toFixed(1) + ' MB' : (file.format || 'FLAC')}</td>
-                    <td><button style="padding:4px 8px; border-radius:6px; background:var(--primary); color:#fff; border:none; cursor:pointer;" onclick="event.stopPropagation(); playSong(${JSON.stringify(file).replace(/"/g, '&quot;')})">播放</button></td>
+                    <td>
+                        <button style="padding:4px 8px; border-radius:6px; background:var(--primary); color:#fff; border:none; cursor:pointer; margin-right:6px;" onclick="event.stopPropagation(); playSong(${safeJson})">播放</button>
+                        <button style="padding:4px 8px; border-radius:6px; background:rgba(160,68,255,0.25); color:#fff; border:1px solid var(--primary); cursor:pointer;" onclick="event.stopPropagation(); startSeedAIRadio(${safeJson})">⚡ 漫游</button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
