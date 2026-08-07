@@ -20,7 +20,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 sys.path.append(os.path.join(project_root, "infer"))
 
-from infer.infer import load_model, build_features
+from infer.model_infer import load_model, build_features
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
 

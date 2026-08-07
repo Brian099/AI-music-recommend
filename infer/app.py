@@ -36,7 +36,7 @@ if project_root not in sys.path:
 
 from infer.Embeat import EmbeatDatabase
 from infer.offline_extractor import extract_audio_features
-from infer.infer import load_model, build_features
+from infer.model_infer import load_model, build_features
 from infer.auth import verify_password, create_admin_token, require_admin_auth
 from infer.library_db import library_db
 from infer.quality_analyzer import analyze_audio_quality

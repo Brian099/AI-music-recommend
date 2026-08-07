@@ -92,7 +92,11 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
     if not _LDDC_AVAILABLE:
         return None
 
-    query = f"{title} {artist}".strip()
+    import re
+    clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title).strip()
+    clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
+
+    query = f"{clean_title} {clean_artist}".strip()
     if not query:
         return None
 
@@ -106,15 +110,26 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
                 candidates.extend(res.results)
             elif isinstance(res, list):
                 candidates.extend(res)
-        except Exception as e:
+        except Exception:
             continue
+
+    if not candidates and clean_artist:
+        for scraper in scrapers:
+            try:
+                res = await asyncio.to_thread(scraper.search, clean_title, page=1)
+                if res and hasattr(res, 'results') and res.results:
+                    candidates.extend(res.results)
+                elif isinstance(res, list):
+                    candidates.extend(res)
+            except Exception:
+                continue
 
     if not candidates:
         return None
 
     # Use LDDC fuzzy match algorithm
     try:
-        best_match = match_best_lyric(candidates, title=title, artist=artist, duration=duration)
+        best_match = match_best_lyric(candidates, title=clean_title, artist=clean_artist or "Unknown", duration=duration)
         if best_match and hasattr(best_match, 'fetch_lyric'):
             lrc_text = await asyncio.to_thread(best_match.fetch_lyric)
             return lrc_text

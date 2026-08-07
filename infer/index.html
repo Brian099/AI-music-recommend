@@ -133,6 +133,8 @@
         .player-controls { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1; max-width: 600px; }
         .ctrl-btns { display: flex; align-items: center; gap: 20px; }
         .btn-play { width: 44px; height: 44px; border-radius: 50%; background: var(--primary); border: none; color: white; font-size: 18px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 15px var(--primary-glow); }
+        .btn-step { width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: white; font-size: 14px; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: all 0.2s ease; }
+        .btn-step:hover { background: rgba(255,255,255,0.25); transform: scale(1.08); }
         .btn-radio { padding: 6px 14px; border-radius: 20px; background: rgba(160, 68, 255, 0.2); border: 1px solid var(--primary); color: #fff; font-size: 12px; cursor: pointer; font-weight: 600; }
 
         .progress-area { width: 100%; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); }
@@ -205,8 +207,10 @@
 
         <div class="player-controls">
             <div class="ctrl-btns">
+                <button class="btn-step" title="上一曲" onclick="playPrevTrack()">⏮</button>
+                <button class="btn-play" id="play-btn" title="播放/暂停" onclick="togglePlay()">▶</button>
+                <button class="btn-step" title="下一曲" onclick="playNextTrack()">⏭</button>
                 <button class="btn-radio" onclick="toggleAIRadio()">⚡ AI 漫游电台</button>
-                <button class="btn-play" id="play-btn" onclick="togglePlay()">▶</button>
             </div>
             <div class="progress-area">
                 <span id="curr-time">00:00</span>
@@ -224,6 +228,10 @@
         const audio = document.getElementById("audio-element");
         let currentPath = "/music";
 
+        let currentPlaylist = [];
+        let currentIndex = -1;
+        let currentLyrics = [];
+
         async function loadFolder(path) {
             currentPath = path;
             const res = await fetch(`/api/library/folder/browse?path=${encodeURIComponent(path)}`);
@@ -237,6 +245,7 @@
 
             const tbody = document.getElementById("song-list");
             tbody.innerHTML = "";
+            currentPlaylist = data.files || [];
 
             // Render subfolders
             if (data.folders) {
@@ -267,6 +276,10 @@
         }
 
         function playSong(file) {
+            if (currentPlaylist && currentPlaylist.length > 0) {
+                currentIndex = currentPlaylist.findIndex(f => f.local_path === file.local_path);
+            }
+
             audio.src = `/api/audio/stream?path=${encodeURIComponent(file.local_path)}`;
             audio.play();
 
@@ -304,24 +317,68 @@
             }
 
             loadLyrics(file.local_path, file.track_name, file.artist_name);
+
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: file.track_name,
+                    artist: file.artist_name,
+                    album: 'Embeat Audio',
+                    artwork: [{ src: coverUrl, sizes: '512x512', type: 'image/jpeg' }]
+                });
+                navigator.mediaSession.setActionHandler('previoustrack', playPrevTrack);
+                navigator.mediaSession.setActionHandler('nexttrack', playNextTrack);
+            }
         }
+
+        function playNextTrack() {
+            if (!currentPlaylist || currentPlaylist.length === 0) return;
+            currentIndex = (currentIndex + 1) % currentPlaylist.length;
+            playSong(currentPlaylist[currentIndex]);
+        }
+
+        function playPrevTrack() {
+            if (!currentPlaylist || currentPlaylist.length === 0) return;
+            currentIndex = (currentIndex - 1 + currentPlaylist.length) % currentPlaylist.length;
+            playSong(currentPlaylist[currentIndex]);
+        }
+
+        audio.onended = () => {
+            playNextTrack();
+        };
 
         async function loadLyrics(path, title, artist) {
             const res = await fetch(`/api/lyrics?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
             const data = await res.json();
             const container = document.getElementById("lyrics-container");
             container.innerHTML = "";
+            currentLyrics = [];
+
             if (data.lyrics) {
                 const lines = data.lyrics.split("\n");
                 lines.forEach(l => {
-                    const text = l.replace(/\[\d+:\d+\.\d+\]/g, "").trim();
+                    const match = l.match(/\[(\d+):(\d+(?:\.\d+)?)\]/);
+                    const text = l.replace(/\[\d+:\d+(?:\.\d+)?\]/g, "").trim();
                     if (text) {
+                        let timeSec = 0;
+                        if (match) {
+                            timeSec = parseInt(match[1]) * 60 + parseFloat(match[2]);
+                        }
                         const div = document.createElement("div");
                         div.className = "lyric-line";
+                        div.id = `lyric-line-${currentLyrics.length}`;
                         div.innerText = text;
+                        div.onclick = () => { if (timeSec) audio.currentTime = timeSec; };
                         container.appendChild(div);
+
+                        currentLyrics.push({ time: timeSec, index: currentLyrics.length, element: div });
                     }
                 });
+
+                if (currentLyrics.length === 0) {
+                    container.innerHTML = `<div class="lyric-line active">暂无纯文本歌词</div>`;
+                }
+            } else {
+                container.innerHTML = `<div class="lyric-line active">暂无歌词</div>`;
             }
         }
 
@@ -351,6 +408,26 @@
                 document.getElementById("progress-fill").style.width = `${pct}%`;
                 document.getElementById("curr-time").innerText = formatTime(audio.currentTime);
                 document.getElementById("total-time").innerText = formatTime(audio.duration);
+
+                // Sync lyrics highlighting & scrolling
+                if (currentLyrics && currentLyrics.length > 0) {
+                    let activeIdx = -1;
+                    for (let i = 0; i < currentLyrics.length; i++) {
+                        if (audio.currentTime >= currentLyrics[i].time) {
+                            activeIdx = i;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (activeIdx !== -1) {
+                        document.querySelectorAll(".lyric-line").forEach(el => el.classList.remove("active"));
+                        const activeEl = document.getElementById(`lyric-line-${activeIdx}`);
+                        if (activeEl) {
+                            activeEl.classList.add("active");
+                            activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }
+                    }
+                }
             }
         };
 
@@ -477,6 +554,8 @@
         function renderTrackTable(tracks) {
             const tbody = document.getElementById("song-list");
             tbody.innerHTML = "";
+            currentPlaylist = tracks || [];
+
             if (!tracks || tracks.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">暂无曲目数据</td></tr>`;
                 return;

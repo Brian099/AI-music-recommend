@@ -13,7 +13,7 @@ from natsort import natsorted
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-from infer.infer import infer
+from infer.model_infer import infer
 
 song_dict = {
     "周杰伦 - 晴天": {'key': 7, 'mode': 1, 'tempo': 137, 'time_signature': 4, 'danceability': 0.54, 'energy': 0.56, 'speechiness': 0.02, 'instrumentalness': 0.0, 'valence': 0.41, 'acousticness': 0.23, 'liveness': 0.1},

@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-from infer.infer import build_features, load_model
+from infer.model_infer import build_features, load_model
 
 # Payload fields to keep in qdrant points
 PAYLOAD_FIELD_WHITELIST = (
