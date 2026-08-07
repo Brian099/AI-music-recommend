@@ -27,9 +27,11 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Fil
 from pydantic import BaseModel
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+infer_path = os.path.join(project_root, "infer")
+if infer_path not in sys.path:
+    sys.path.insert(0, infer_path)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-sys.path.append(os.path.join(project_root, "infer"))
 
 from infer.Embeat import EmbeatDatabase
 from infer.offline_extractor import extract_audio_features
@@ -159,7 +161,7 @@ async def list_tracks(artist: Optional[str] = None, album: Optional[str] = None)
 
 @app.get("/api/audio/stream")
 @app.get("/audio/{track_id}")
-async def stream_audio(track_id: Optional[str] = None, path: Optional[str] = Query(None), request: Request = None):
+async def stream_audio(request: Request, track_id: Optional[str] = None, path: Optional[str] = Query(None)):
     local_path = path
     if not local_path and track_id:
         # Check SQLite or Qdrant

@@ -50,9 +50,9 @@ def is_valid_token(token: str) -> bool:
 
 
 async def require_admin_auth(
+    request: Request,
     token_header: Optional[str] = Depends(api_key_header),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
-    request: Optional[Request] = None
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer)
 ) -> str:
     """
     FastAPI Dependency to intercept administrative endpoints.
