@@ -44,6 +44,24 @@ from infer.dedupe import find_duplicates, resolve_duplicate, calculate_file_md5
 from infer.scraper import fetch_online_metadata, fetch_lyrics_lddc, apply_scrape_to_file
 from qdrant_client import QdrantClient
 
+import logging
+
+LOG_DIR = os.path.join(project_root, "data")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
+
+logger = logging.getLogger("embeat")
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s"))
+    logger.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s"))
+    logger.addHandler(stream_handler)
+
 app = FastAPI(title="Embeat Music Manager & Player Engine")
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
@@ -53,7 +71,7 @@ GLOBAL_DB_PATH = os.path.join(project_root, "embeat_qdrant_db")
 
 # Detect optional 45M预置数据包
 HAS_GLOBAL_DB = os.path.exists(GLOBAL_DB_PATH)
-print(f"[Embeat] Global 45M Vector Package Detected: {HAS_GLOBAL_DB}")
+logger.info(f"[Embeat] Global 45M Vector Package Detected: {HAS_GLOBAL_DB} | Log File: {LOG_FILE}")
 
 db = EmbeatDatabase(qdrant_url=QDRANT_URL, collection_name=COLLECTION_NAME, verbose_log=False)
 
@@ -120,14 +138,29 @@ async def browse_folder(path: Optional[str] = Query(None)):
                     title = parts[1].strip() if len(parts) == 2 else parts[0].strip()
                     artist = parts[0].strip() if len(parts) == 2 else "Unknown Artist"
 
-                    files.append({
+                    track_obj = {
                         "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, entry.path)),
                         "track_name": title,
                         "artist_name": artist,
                         "local_path": entry.path,
                         "file_size": stat.st_size,
                         "mtime": stat.st_mtime
-                    })
+                    }
+                    files.append(track_obj)
+
+                    # Instant auto-indexing into SQLite library_db so Artists & Albums populate with 0 waiting!
+                    try:
+                        library_db.upsert_track({
+                            "track_id": track_obj["track_id"],
+                            "local_path": track_obj["local_path"],
+                            "track_name": track_obj["track_name"],
+                            "artist_name": track_obj["artist_name"],
+                            "album_name": "Local Audio",
+                            "file_size": track_obj["file_size"],
+                            "mtime": track_obj["mtime"]
+                        })
+                    except Exception:
+                        pass
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to browse folder: {e}")
 
@@ -249,6 +282,7 @@ async def get_lyrics(path: str = Query(...), title: Optional[str] = None, artist
     1. Read local .lrc file (0ms latency)
     2. Fallback to online fetch & auto-save to disk
     """
+    logger.info(f"[API /api/lyrics] Request received | path='{path}', title='{title}', artist='{artist}'")
     q_title = title
     q_artist = artist
 
@@ -261,27 +295,34 @@ async def get_lyrics(path: str = Query(...), title: Optional[str] = None, artist
         if os.path.exists(lrc_file):
             try:
                 with open(lrc_file, "r", encoding="utf-8") as f:
-                    return {"source": "local", "lyrics": f.read()}
-            except Exception:
-                pass
+                    content = f.read()
+                    logger.info(f"[API /api/lyrics] Local .lrc file hit at '{lrc_file}' | length={len(content)}")
+                    return {"source": "local", "lyrics": content}
+            except Exception as e:
+                logger.warning(f"[API /api/lyrics] Failed reading local .lrc file '{lrc_file}': {e}")
 
     # Online Fetch & Auto-Save
     q_title = q_title or "Unknown Track"
     q_artist = q_artist or "Unknown Artist"
 
+    logger.info(f"[API /api/lyrics] Executing online lyrics search for q_title='{q_title}', q_artist='{q_artist}'...")
     lrc_text = await fetch_lyrics_lddc(title=q_title, artist=q_artist)
+
     if lrc_text:
+        logger.info(f"[API /api/lyrics] Online lyrics SUCCESS | length={len(lrc_text)} chars")
         if path and os.path.exists(os.path.dirname(path)):
             base_path = os.path.splitext(path)[0]
             lrc_file = f"{base_path}.lrc"
             try:
                 with open(lrc_file, "w", encoding="utf-8") as f:
                     f.write(lrc_text)
+                logger.info(f"[API /api/lyrics] Saved online lyrics to local file '{lrc_file}'")
             except Exception as e:
-                print(f"[Lyrics] Save .lrc failed: {e}")
+                logger.error(f"[API /api/lyrics] Save .lrc failed: {e}")
 
         return {"source": "online", "lyrics": lrc_text}
 
+    logger.warning(f"[API /api/lyrics] Online lyrics NOT FOUND for '{q_title}' - '{q_artist}'")
     return {"source": "none", "lyrics": "[00:00.00]暂无歌词"}
 
 
