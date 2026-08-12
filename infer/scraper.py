@@ -75,18 +75,30 @@ _LDDC_AVAILABLE = len(AVAILABLE_SCRAPERS) > 0 and _MATCH_BEST_AVAILABLE
 def build_keyword(title: str, artist: str, file_path: str = "") -> str:
     """
     Constructs search keyword:
-    Prefers clean filename (strips extension and leading track number prefixes like 01., [02]-).
-    Otherwise combines title and artist.
+    Prefers clean filename / smart mutagen info.
+    Strips leading track number prefixes like 01., [02]-, and parses title & artist.
     """
-    if file_path:
-        name = os.path.basename(str(file_path))
-        name = re.sub(r"\.[^.]+$", "", name).strip()
-        name = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", name)
-        if name:
-            return name.strip()
-    
-    clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
+    clean_artist = "" if not artist or artist.lower() == "unknown artist" else artist.strip()
     clean_title = re.sub(r"^\d+[\.\s\-_]+", "", title or "").strip()
+
+    if file_path:
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        clean_name = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", base_name).strip()
+
+        if not clean_artist:
+            if " - " in clean_name:
+                parts = clean_name.split(" - ", 1)
+                clean_artist, clean_title = parts[0].strip(), parts[1].strip()
+            elif "-" in clean_name and not clean_name.startswith("-"):
+                parts = clean_name.split("-", 1)
+                p1, p2 = parts[0].strip(), parts[1].strip()
+                if len(p2) <= 10 and not any(c.isdigit() for c in p2):
+                    clean_title, clean_artist = p1, p2
+                else:
+                    clean_artist, clean_title = p1, p2
+        elif not clean_title:
+            clean_title = clean_name
+
     return " ".join(x for x in [clean_title, clean_artist] if x).strip()
 
 

@@ -119,6 +119,75 @@ async def serve_player():
         return f.read()
 
 
+def parse_audio_file_info(file_path: str) -> dict:
+    """
+    Smart 3-stage audio metadata parser:
+    1. Reads SQLite database (if scraped or previously saved with valid artist)
+    2. Reads Mutagen ID3 / FLAC tags from local file
+    3. Fallback to smart filename regex (cleans leading track numbers, splits title/artist)
+    """
+    existing = library_db.get_track_by_path(file_path)
+    if existing and existing.get("artist_name") and existing.get("artist_name") != "Unknown Artist":
+        return {
+            "title": existing.get("track_name"),
+            "artist": existing.get("artist_name"),
+            "album": existing.get("album_name") or "Local Audio"
+        }
+
+    try:
+        mf = MutagenFile(file_path)
+        if mf:
+            art = mf.get("artist") or mf.get("TPE1") or mf.get("ARTIST")
+            tit = mf.get("title") or mf.get("TIT2") or mf.get("TITLE")
+            alb = mf.get("album") or mf.get("TALB") or mf.get("ALBUM")
+
+            def _clean_tag(t):
+                if isinstance(t, (list, tuple)) and len(t) > 0:
+                    return str(t[0]).strip()
+                elif isinstance(t, str):
+                    return t.strip()
+                return ""
+
+            art_str = _clean_tag(art)
+            tit_str = _clean_tag(tit)
+            alb_str = _clean_tag(alb)
+
+            if art_str and art_str.lower() != "unknown artist" and tit_str:
+                return {
+                    "title": tit_str,
+                    "artist": art_str,
+                    "album": alb_str or "Local Audio"
+                }
+    except Exception:
+        pass
+
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    clean_name = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", base_name).strip()
+
+    title = clean_name
+    artist = "Unknown Artist"
+
+    if " - " in clean_name:
+        parts = clean_name.split(" - ", 1)
+        artist, title = parts[0].strip(), parts[1].strip()
+    elif "-" in clean_name and not clean_name.startswith("-"):
+        parts = clean_name.split("-", 1)
+        p1, p2 = parts[0].strip(), parts[1].strip()
+        if len(p2) <= 10 and not any(c.isdigit() for c in p2):
+            title, artist = p1, p2
+        else:
+            artist, title = p1, p2
+    elif "_" in clean_name:
+        parts = clean_name.split("_", 1)
+        artist, title = parts[0].strip(), parts[1].strip()
+
+    return {
+        "title": title or base_name,
+        "artist": artist or "Unknown Artist",
+        "album": "Local Audio"
+    }
+
+
 # ── Library Navigation APIs (Public / 0-Wait Instant Folder Browse) ──────────
 
 @app.get("/api/library/folder/browse")
@@ -146,14 +215,12 @@ async def browse_folder(path: Optional[str] = Query(None)):
                     })
                 elif entry.is_file() and entry.name.lower().endswith((".mp3", ".wav", ".flac", ".m4a", ".ogg")):
                     stat = entry.stat()
-                    parts = entry.name.rsplit('.', 1)[0].split(" - ", 1)
-                    title = parts[1].strip() if len(parts) == 2 else parts[0].strip()
-                    artist = parts[0].strip() if len(parts) == 2 else "Unknown Artist"
+                    info = parse_audio_file_info(entry.path)
 
                     track_obj = {
                         "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, entry.path)),
-                        "track_name": title,
-                        "artist_name": artist,
+                        "track_name": info["title"],
+                        "artist_name": info["artist"],
                         "local_path": entry.path,
                         "file_size": stat.st_size,
                         "mtime": stat.st_mtime
@@ -167,7 +234,7 @@ async def browse_folder(path: Optional[str] = Query(None)):
                             "local_path": track_obj["local_path"],
                             "track_name": track_obj["track_name"],
                             "artist_name": track_obj["artist_name"],
-                            "album_name": "Local Audio",
+                            "album_name": info.get("album", "Local Audio"),
                             "file_size": track_obj["file_size"],
                             "mtime": track_obj["mtime"]
                         })
@@ -509,17 +576,14 @@ async def _run_micro_batch_scan(workers: int):
         for f in batch:
             try:
                 md5 = await asyncio.to_thread(calculate_file_md5, f)
-                base_name = os.path.splitext(os.path.basename(f))[0]
-                parts = base_name.split(" - ", 1)
-                title = parts[1].strip() if len(parts) == 2 else parts[0].strip()
-                artist = parts[0].strip() if len(parts) == 2 else "Unknown Artist"
+                info = parse_audio_file_info(f)
 
                 row = {
                     "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f)),
                     "local_path": f,
-                    "track_name": title,
-                    "artist_name": artist,
-                    "album_name": "Local Audio",
+                    "track_name": info["title"],
+                    "artist_name": info["artist"],
+                    "album_name": info.get("album", "Local Audio"),
                     "duration": 180.0,
                     "file_size": os.path.getsize(f),
                     "mtime": os.path.getmtime(f),
@@ -593,8 +657,9 @@ async def _run_batch_scrape(workers: int):
             processed += 1
             continue
 
-        title = track.get("track_name") or os.path.basename(path)
-        artist = track.get("artist_name") or "Unknown Artist"
+        info = parse_audio_file_info(path)
+        title = info.get("title") or track.get("track_name") or os.path.basename(path)
+        artist = info.get("artist") if info.get("artist") != "Unknown Artist" else (track.get("artist_name") or "Unknown Artist")
 
         try:
             meta = await fetch_online_metadata(title, artist, file_path=path)
