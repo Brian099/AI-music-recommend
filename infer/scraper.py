@@ -1,24 +1,27 @@
 # -*- coding: utf-8 -*-
 # Written by GD Studio / Antigravity AI
-# Date: 2026-08-07
+# Date: 2026-08-12
 #
-# Metadata Scraping Engine & LDDC Lyrics Integration
-# Integrates online metadata scraping (MusicBrainz/iTunes/NetEase) and LDDC multi-source lyrics fetching.
-# Performs double persistence: writes ID3/FLAC tags + embedded covers via mutagen, updates SQLite & Qdrant.
+# Fused Multi-Source Metadata Scraping Engine & Mutagen ID3/FLAC Persistence
+# Integrates 5-platform aggregation engine (NetEase, QQ Music, Kugou, Soda, Apple Music)
+# with mutagen tag writing, embedded artwork, LRC lyric saving, and SQLite indexing.
 
 import os
 import sys
-import json
+import re
+import time
 import asyncio
+import logging
+from typing import Dict, Any, Optional, List, Tuple
+from mutagen import File as MutagenFile
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TCON, TRCK, APIC, USLT
+from mutagen.flac import FLAC, Picture
+
 try:
     import httpx
     _HTTPX_AVAILABLE = True
 except ImportError:
     _HTTPX_AVAILABLE = False
-from typing import Dict, Any, Optional, List
-from mutagen import File as MutagenFile
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TCON, TRCK, APIC, USLT
-from mutagen.flac import FLAC, Picture
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 infer_path = os.path.join(project_root, "infer")
@@ -27,32 +30,38 @@ if infer_path not in sys.path:
 
 from infer.library_db import library_db
 
-# # Try importing LDDC core components individually for maximum resilience
+# Import search aggregator
+from infer.search import aggregate
+from infer.search.sources import SOURCE_REGISTRY
+
+logger = logging.getLogger("embeat")
+
+# LDDC Lyrics fallback scrapers
 AVAILABLE_SCRAPERS = []
 
 try:
     from LDDC.core.api.lyrics.qm import QMScraper
     AVAILABLE_SCRAPERS.append(QMScraper())
 except Exception as e:
-    print(f"[Scraper] QMScraper load notice: {e}")
+    logger.debug(f"[Scraper] QMScraper load notice: {e}")
 
 try:
     from LDDC.core.api.lyrics.ne import NEScraper
     AVAILABLE_SCRAPERS.append(NEScraper())
 except Exception as e:
-    print(f"[Scraper] NEScraper load notice: {e}")
+    logger.debug(f"[Scraper] NEScraper load notice: {e}")
 
 try:
     from LDDC.core.api.lyrics.lrclib import LRCLIBScraper
     AVAILABLE_SCRAPERS.append(LRCLIBScraper())
 except Exception as e:
-    print(f"[Scraper] LRCLIBScraper load notice: {e}")
+    logger.debug(f"[Scraper] LRCLIBScraper load notice: {e}")
 
 try:
     from LDDC.core.api.lyrics.kg import KGScraper
     AVAILABLE_SCRAPERS.append(KGScraper())
 except Exception as e:
-    print(f"[Scraper] KGScraper load notice: {e}")
+    logger.debug(f"[Scraper] KGScraper load notice: {e}")
 
 try:
     from LDDC.core.algorithm import match_best_lyric
@@ -63,8 +72,106 @@ except Exception as e:
 _LDDC_AVAILABLE = len(AVAILABLE_SCRAPERS) > 0 and _MATCH_BEST_AVAILABLE
 
 
-async def fetch_online_metadata(title: str, artist: str) -> Dict[str, Any]:
-    """Search iTunes Search API & MusicBrainz for metadata and high-res cover art."""
+def build_keyword(title: str, artist: str, file_path: str = "") -> str:
+    """
+    Constructs search keyword:
+    Prefers clean filename (strips extension and leading track number prefixes like 01., [02]-).
+    Otherwise combines title and artist.
+    """
+    if file_path:
+        name = os.path.basename(str(file_path))
+        name = re.sub(r"\.[^.]+$", "", name).strip()
+        name = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", name)
+        if name:
+            return name.strip()
+    
+    clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
+    clean_title = re.sub(r"^\d+[\.\s\-_]+", "", title or "").strip()
+    return " ".join(x for x in [clean_title, clean_artist] if x).strip()
+
+
+def _candidate_complete(item: dict, wants: List[str]) -> bool:
+    """Checks if search candidate contains non-empty values for required fields."""
+    key_map = {"cover": "picUrl", "year": "date"}
+    for field in wants:
+        key = key_map.get(field, field)
+        if not item.get(key):
+            return False
+    return True
+
+
+def _search_first_complete(keyword: str, sources: List[str], wants: List[str], page_size: int = 5, timeout: int = 8) -> Tuple[Optional[dict], List[dict]]:
+    """
+    Searches platform by platform:
+    If a candidate has all required fields (complete), returns immediately without querying remaining sources.
+    Returns (candidate, all_flat_candidates).
+    """
+    all_flat = []
+    for platform in sources:
+        groups, _total = aggregate.search_songs(
+            keyword, [platform], page=1, page_size=page_size, timeout=timeout
+        )
+        items = []
+        for g in groups:
+            for item in g.get("items") or []:
+                item = dict(item)
+                item["_platform"] = g["pluginId"]
+                items.append(item)
+        all_flat.extend(items)
+        for item in items:
+            if _candidate_complete(item, wants):
+                return item, all_flat
+    return None, all_flat
+
+
+def _complement_candidate(flat: List[dict], wants: List[str]) -> Optional[dict]:
+    """
+    Merges a complete candidate from multi-platform search results.
+    Takes flat[0] as base.
+    Missing title/artist is complemented from subsequent candidates.
+    Other missing fields (album/cover/year/trackNumber) are complemented ONLY IF
+    candidate title and artist match base title and artist exactly (same song).
+    """
+    if not flat:
+        return None
+    base = dict(flat[0])
+    field_map = {
+        "album": "album",
+        "cover": "picUrl",
+        "year": "date",
+        "trackNumber": "trackNumber",
+        "discNumber": "discNumber",
+    }
+    for field in ("title", "artist"):
+        if field not in wants or base.get(field):
+            continue
+        for cand in flat[1:]:
+            if cand.get(field):
+                base[field] = cand[field]
+                break
+
+    base_title = (base.get("title") or "").strip()
+    base_artist = (base.get("artist") or "").strip()
+
+    for field, key in field_map.items():
+        if field not in wants or base.get(key):
+            continue
+        for cand in flat[1:]:
+            if (cand.get("title") or "").strip() != base_title:
+                continue
+            if (cand.get("artist") or "").strip() != base_artist:
+                continue
+            if cand.get(key):
+                base[key] = cand[key]
+                break
+    return base
+
+
+def sync_fetch_online_metadata(title: str, artist: str, file_path: str = "") -> Dict[str, Any]:
+    """
+    Synchronous multi-source metadata aggregator:
+    Queries NetEase, QQ Music, Kugou, Soda, and Apple Music using early-stop & complement logic.
+    """
     result = {
         "title": title,
         "artist": artist,
@@ -72,53 +179,95 @@ async def fetch_online_metadata(title: str, artist: str) -> Dict[str, Any]:
         "year": None,
         "genre": "",
         "cover_url": "",
-        "track_number": None
+        "track_number": None,
+        "disc_number": None,
+        "platform": ""
     }
-    
-    query = f"{title} {artist}".strip()
-    if not query or not _HTTPX_AVAILABLE:
+
+    keyword = build_keyword(title, artist, file_path=file_path)
+    if not keyword:
         return result
 
+    sources = ["netease", "qq", "kugou", "soda", "apple"]
+    wants = ["title", "artist", "album", "cover", "year"]
+
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(
-                "https://itunes.apple.com/search",
-                params={"term": query, "media": "music", "limit": 1}
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("resultCount", 0) > 0:
-                    best = data["results"][0]
-                    result["title"] = best.get("trackName", title)
-                    result["artist"] = best.get("artistName", artist)
-                    result["album"] = best.get("collectionName", "")
-                    result["genre"] = best.get("primaryGenreName", "")
-                    result["track_number"] = best.get("trackNumber", None)
+        candidate, flat = _search_first_complete(keyword, sources, wants)
+        if candidate is None:
+            candidate = _complement_candidate(flat, wants)
 
-                    if best.get("releaseDate"):
-                        try:
-                            result["year"] = int(best["releaseDate"][:4])
-                        except ValueError:
-                            pass
+        if candidate:
+            result["title"] = candidate.get("title") or title
+            result["artist"] = candidate.get("artist") or artist
+            result["album"] = candidate.get("album") or ""
+            result["cover_url"] = candidate.get("picUrl") or ""
+            result["platform"] = candidate.get("_platform") or ""
 
-                    artwork = best.get("artworkUrl100", "")
-                    if artwork:
-                        result["cover_url"] = artwork.replace("100x100bb.jpg", "600x600bb.jpg")
+            # Upgrade iTunes cover resolution if applicable
+            if "100x100bb.jpg" in result["cover_url"]:
+                result["cover_url"] = result["cover_url"].replace("100x100bb.jpg", "600x600bb.jpg")
+
+            date_str = str(candidate.get("date") or candidate.get("year") or "")
+            if date_str:
+                match = re.search(r"\b(19\d\d|20\d\d)\b", date_str)
+                if match:
+                    result["year"] = int(match.group(1))
+
+            tn = candidate.get("trackNumber") or candidate.get("track_no")
+            if tn and str(tn).isdigit():
+                result["track_number"] = int(tn)
+
+            dn = candidate.get("discNumber") or candidate.get("disc_no")
+            if dn and str(dn).isdigit():
+                result["disc_number"] = int(dn)
+
+            if candidate.get("genre"):
+                result["genre"] = candidate.get("genre")
+
+            result["candidate"] = candidate
+
     except Exception as e:
-        print(f"[Scraper] iTunes metadata search exception: {e}")
+        logger.error(f"[Scraper] Exception during aggregated metadata search for '{keyword}': {e}")
 
     return result
 
 
-import logging
-logger = logging.getLogger("embeat")
+async def fetch_online_metadata(title: str, artist: str, file_path: str = "") -> Dict[str, Any]:
+    """Async wrapper for multi-source metadata search."""
+    return await asyncio.to_thread(sync_fetch_online_metadata, title, artist, file_path)
+
+
+def sync_fetch_lyrics_aggregated(title: str, artist: str, file_path: str = "") -> Optional[str]:
+    """
+    Synchronous lyric fetcher across 5 aggregate platforms (NetEase, QQ, Kugou, Soda, Apple).
+    """
+    clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title or '').strip()
+    clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
+
+    song_obj = {
+        "title": clean_title,
+        "artist": clean_artist,
+        "album": "",
+        "duration": 0
+    }
+
+    platforms = ["netease", "qq", "kugou", "soda", "apple"]
+    for p in platforms:
+        try:
+            res = aggregate.get_lyrics(p, song_obj, timeout=6)
+            if res and res.get("rawPlainLrc") and len(res["rawPlainLrc"].strip()) > 10:
+                logger.info(f"[Scraper Log] Fetched lyrics successfully from platform: {p}")
+                return res["rawPlainLrc"]
+        except Exception as e:
+            logger.debug(f"[Scraper Log] Platform {p} lyric fetch error: {e}")
+
+    return None
 
 
 async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
-    """100% reliable zero-dependency fallback lyric fetcher via requests."""
+    """Fallback lyric fetcher via direct HTTP requests."""
     import requests
-    import re
-    clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title).strip()
+    clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title or '').strip()
     clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
 
     queries = []
@@ -127,14 +276,11 @@ async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
     queries.append(clean_title)
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36"
     }
-
-    logger.info(f"[Lyric Log] Starting direct requests fallback search for queries={queries}")
 
     for q in queries:
         try:
-            logger.info(f"[Lyric Log] Querying NetEase API for '{q}'...")
             search_res = await asyncio.to_thread(
                 requests.get,
                 "http://music.163.com/api/search/get/web",
@@ -145,13 +291,8 @@ async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
             if search_res.status_code == 200:
                 data = search_res.json()
                 songs = data.get("result", {}).get("songs", [])
-                logger.info(f"[Lyric Log] NetEase search for '{q}' returned {len(songs)} song candidates")
                 if songs:
                     song_id = songs[0]["id"]
-                    song_name = songs[0].get("name", "")
-                    artist_name = songs[0].get("artists", [{}])[0].get("name", "")
-                    logger.info(f"[Lyric Log] Top candidate: id={song_id}, name='{song_name}', artist='{artist_name}'")
-
                     lrc_res = await asyncio.to_thread(
                         requests.get,
                         "http://music.163.com/api/song/lyric",
@@ -163,27 +304,25 @@ async def _fetch_lyrics_fallback(title: str, artist: str) -> Optional[str]:
                         lrc_data = lrc_res.json()
                         lrc_str = lrc_data.get("lrc", {}).get("lyric", "")
                         if lrc_str and len(lrc_str.strip()) > 10:
-                            logger.info(f"[Lyric Log] SUCCESS: Fetched {len(lrc_str)} chars of LRC lyrics via fallback!")
                             return lrc_str
-                        else:
-                            logger.warning(f"[Lyric Log] Song id={song_id} returned empty or invalid lyric string.")
-            else:
-                logger.warning(f"[Lyric Log] NetEase search HTTP error status={search_res.status_code}")
-        except Exception as e:
-            logger.error(f"[Lyric Log] Exception during fallback search for '{q}': {e}")
+        except Exception:
             continue
 
-    logger.warning(f"[Lyric Log] Fallback search finished with NO lyrics found.")
     return None
 
 
-async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> Optional[str]:
-    """Fetch lyrics using integrated LDDC multi-source engine + direct fallback."""
-    import re
-    clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title).strip()
-    clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
+async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0, file_path: str = "") -> Optional[str]:
+    """
+    Fetch lyrics using multi-source aggregate engine -> LDDC -> direct HTTP fallback.
+    """
+    # 1. Try aggregated 5-platform engine
+    lrc_agg = await asyncio.to_thread(sync_fetch_lyrics_aggregated, title, artist, file_path)
+    if lrc_agg:
+        return lrc_agg
 
-    logger.info(f"[Lyric Log] fetch_lyrics_lddc called | raw_title='{title}', clean_title='{clean_title}', clean_artist='{clean_artist}', LDDC_AVAILABLE={_LDDC_AVAILABLE}, scrapers_count={len(AVAILABLE_SCRAPERS)}")
+    # 2. Try LDDC scrapers
+    clean_title = re.sub(r'^\d+[\.\s\-_]+', '', title or '').strip()
+    clean_artist = "" if not artist or artist == "Unknown Artist" else artist.strip()
 
     if _LDDC_AVAILABLE and AVAILABLE_SCRAPERS:
         query = f"{clean_title} {clean_artist}".strip()
@@ -196,23 +335,8 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
                     candidates.extend(res.results)
                 elif isinstance(res, list):
                     candidates.extend(res)
-            except Exception as e:
-                logger.warning(f"[Lyric Log] Scraper {scraper.__class__.__name__} search error: {e}")
+            except Exception:
                 continue
-
-        logger.info(f"[Lyric Log] LDDC scrapers search returned {len(candidates)} total candidates for query='{query}'")
-
-        if not candidates and clean_artist:
-            logger.info(f"[Lyric Log] No candidates for '{query}', retrying title-only query='{clean_title}'...")
-            for scraper in AVAILABLE_SCRAPERS:
-                try:
-                    res = await asyncio.to_thread(scraper.search, clean_title, page=1)
-                    if res and hasattr(res, 'results') and res.results:
-                        candidates.extend(res.results)
-                    elif isinstance(res, list):
-                        candidates.extend(res)
-                except Exception:
-                    continue
 
         if candidates:
             try:
@@ -220,24 +344,11 @@ async def fetch_lyrics_lddc(title: str, artist: str, duration: float = 0.0) -> O
                 if best_match and hasattr(best_match, 'fetch_lyric'):
                     lrc_text = await asyncio.to_thread(best_match.fetch_lyric)
                     if lrc_text:
-                        logger.info(f"[Lyric Log] SUCCESS: LDDC match_best_lyric fetched {len(lrc_text)} chars!")
                         return lrc_text
-                elif isinstance(best_match, dict) and "lyrics" in best_match:
-                    return best_match["lyrics"]
-            except Exception as e:
-                logger.warning(f"[Lyric Log] LDDC match_best_lyric algorithm exception: {e}")
+            except Exception:
+                pass
 
-            for cand in candidates:
-                try:
-                    if hasattr(cand, 'fetch_lyric'):
-                        lrc_text = await asyncio.to_thread(cand.fetch_lyric)
-                        if lrc_text:
-                            logger.info(f"[Lyric Log] SUCCESS: Candidate fallback fetched {len(lrc_text)} chars!")
-                            return lrc_text
-                except Exception:
-                    continue
-
-    logger.info(f"[Lyric Log] LDDC scrapers yields no lyric, initiating direct requests fallback...")
+    # 3. Fallback to direct HTTP
     return await _fetch_lyrics_fallback(clean_title, clean_artist)
 
 
@@ -254,26 +365,28 @@ async def apply_scrape_to_file(local_path: str, metadata: Dict[str, Any], lrc_te
     lrc_path = os.path.join(folder_dir, f"{base_name}.lrc")
     cover_file_path = os.path.join(folder_dir, "cover.jpg")
 
-    # Download artwork image
+    # Download artwork image with browser User-Agent
     cover_data = None
     if metadata.get("cover_url"):
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.get(metadata["cover_url"])
-                if res.status_code == 200:
-                    cover_data = res.content
-                    with open(cover_file_path, "wb") as f:
-                        f.write(cover_data)
+            if _HTTPX_AVAILABLE:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36"}
+                async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+                    res = await client.get(metadata["cover_url"])
+                    if res.status_code == 200 and len(res.content) > 32:
+                        cover_data = res.content
+                        with open(cover_file_path, "wb") as f:
+                            f.write(cover_data)
         except Exception as e:
-            print(f"[Scraper] Download cover image failed: {e}")
+            logger.error(f"[Scraper] Download cover image failed for {metadata.get('cover_url')}: {e}")
 
-    # Write .lrc file
+    # Save .lrc file
     if lrc_text:
         try:
             with open(lrc_path, "w", encoding="utf-8") as f:
                 f.write(lrc_text)
         except Exception as e:
-            print(f"[Scraper] Failed to save .lrc file: {e}")
+            logger.error(f"[Scraper] Failed to save .lrc file: {e}")
 
     # Write mutagen embedded tags
     ext = os.path.splitext(local_path)[1].lower()
@@ -294,6 +407,8 @@ async def apply_scrape_to_file(local_path: str, metadata: Dict[str, Any], lrc_te
                 tags["TCON"] = TCON(encoding=3, text=metadata["genre"])
             if metadata.get("year"):
                 tags["TDRC"] = TDRC(encoding=3, text=str(metadata["year"]))
+            if metadata.get("track_number"):
+                tags["TRCK"] = TRCK(encoding=3, text=str(metadata["track_number"]))
             if cover_data:
                 tags["APIC"] = APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=cover_data)
             if lrc_text:
@@ -312,6 +427,8 @@ async def apply_scrape_to_file(local_path: str, metadata: Dict[str, Any], lrc_te
                 audio["GENRE"] = metadata["genre"]
             if metadata.get("year"):
                 audio["DATE"] = str(metadata["year"])
+            if metadata.get("track_number"):
+                audio["TRACKNUMBER"] = str(metadata["track_number"])
 
             if cover_data:
                 pic = Picture()
@@ -323,7 +440,7 @@ async def apply_scrape_to_file(local_path: str, metadata: Dict[str, Any], lrc_te
                 audio.add_picture(pic)
             audio.save()
     except Exception as e:
-        print(f"[Scraper] Mutagen tag writing exception for {local_path}: {e}")
+        logger.error(f"[Scraper] Mutagen tag writing exception for {local_path}: {e}")
 
     # Update SQLite database
     track_record = {

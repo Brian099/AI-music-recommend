@@ -13,16 +13,26 @@ import re
 import sys
 import uuid
 import numpy as np
-import torch
+try:
+    import torch
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 sys.path.append(os.path.join(project_root, "infer"))
 
-from infer.model_infer import load_model, build_features
-from qdrant_client import QdrantClient
-from qdrant_client.http import models as qdrant_models
+try:
+    from infer.model_infer import load_model, build_features
+except ImportError:
+    pass
+try:
+    from qdrant_client import QdrantClient
+    from qdrant_client.http import models as qdrant_models
+except ImportError:
+    pass
 
 # ── Import EmbeatUtils built-in genre map ─────────────────────────────────────
 try:
@@ -70,8 +80,7 @@ if not _ESSENTIA_AVAILABLE:
         _LIBROSA_AVAILABLE = True
         print("[Extractor] Backend: Librosa (30-second snippet)")
     except ImportError:
-        print("Error: Neither Essentia nor Librosa is installed.")
-        sys.exit(1)
+        print("[Extractor] Warning: Neither Essentia nor Librosa is installed in current Python environment.")
 
 try:
     import mutagen

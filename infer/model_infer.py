@@ -5,15 +5,23 @@
 import numpy as np
 import os
 import sys
-import torch
-import torch.nn.functional as functional
-from typing import Optional
+try:
+    import torch
+    import torch.nn.functional as functional
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from typing import Optional, List, Dict, Any
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-from train.dataset import build_dense_vector, key_to_idx, mode_to_idx, tempo_to_idx, time_signature_to_idx
-from train.model import EmbeatMLP, EmbeatMLPConfig
+
+try:
+    from train.dataset import build_dense_vector, key_to_idx, mode_to_idx, tempo_to_idx, time_signature_to_idx
+    from train.model import EmbeatMLP, EmbeatMLPConfig
+except ImportError:
+    pass
 
 
 # Get model default device
@@ -52,7 +60,7 @@ def load_model(checkpoint_path: str = "train/checkpoints/model.pt", device: Opti
 
 
 # Build model input features from HuggingFace Dataset samples
-def build_features(samples: list[dict], torch_device: Optional[torch.device] = None):
+def build_features(samples: list[dict], torch_device: Optional[Any] = None):
     if not samples:
         raise ValueError("HuggingFace Dataset samples should not be empty.")
     key_index = [int(key_to_idx(sample.get("key"))) for sample in samples]
@@ -72,7 +80,7 @@ def build_features(samples: list[dict], torch_device: Optional[torch.device] = N
 
 
 # Raw cosine similarity in range [-1.0, 1.0]
-def cosine_similarity(embedding_a: torch.Tensor, embedding_b: torch.Tensor):
+def cosine_similarity(embedding_a: Any, embedding_b: Any):
     embedding_a = embedding_a.float()
     embedding_b = embedding_b.float()
     if embedding_a.ndim == 1:
@@ -89,7 +97,7 @@ def cosine_similarity(embedding_a: torch.Tensor, embedding_b: torch.Tensor):
 
 
 # Cosine similarity in range [0.0, 1.0]
-def cosine_similarity_01(embedding_a: torch.Tensor, embedding_b: torch.Tensor):
+def cosine_similarity_01(embedding_a: Any, embedding_b: Any):
     raw_cosine = cosine_similarity(embedding_a, embedding_b)
     similarity_01 = 0.5 * (float(raw_cosine) + 1.0)
     similarity_01 = min(max(0.0, similarity_01), 1.0)

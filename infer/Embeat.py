@@ -11,13 +11,21 @@ import sys
 import time
 import uuid
 from collections import Counter
-from gensim.models import KeyedVectors
-from numpy.linalg import norm
-from qdrant_client import QdrantClient
-from qdrant_client.http import models as qdrant_models
-from typing import Any, Union, Literal
-from urllib.parse import urlparse
 DISABLED_PACKAGES = []
+try:
+    from gensim.models import KeyedVectors
+    _GENSIM_AVAILABLE = True
+except Exception as e:
+    _GENSIM_AVAILABLE = False
+    DISABLED_PACKAGES.append("gensim")
+from typing import Any, Union, Literal
+from numpy.linalg import norm
+from urllib.parse import urlparse
+try:
+    from qdrant_client import QdrantClient
+    from qdrant_client.http import models as qdrant_models
+except ImportError:
+    pass
 try:
     import hdbscan
 except Exception as e:

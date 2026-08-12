@@ -17,6 +17,7 @@
             --text-muted: #a1a1a6;
             --accent-green: #00ff88;
             --accent-red: #ff4757;
+            --accent-blue: #00d2ff;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -54,7 +55,20 @@
         }
         .input-field {
             width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--glass-border);
-            background: rgba(255,255,255,0.05); color: white; margin: 16px 0;
+            background: rgba(255,255,255,0.05); color: white; margin: 12px 0;
+        }
+        .badge {
+            font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,0.1);
+        }
+        .progress-container {
+            margin-top: 14px; width: 100%; background: rgba(255,255,255,0.1); height: 8px; border-radius: 4px; overflow: hidden;
+        }
+        .progress-bar {
+            width: 0%; height: 100%; background: linear-gradient(90deg, #a044ff, #00ff88); transition: width 0.3s ease;
+        }
+        .log-box {
+            margin-top: 12px; background: rgba(0,0,0,0.4); border-radius: 8px; padding: 10px;
+            font-family: monospace; font-size: 12px; height: 110px; overflow-y: auto; color: var(--text-main);
         }
     </style>
 </head>
@@ -74,45 +88,79 @@
     </header>
 
     <div class="grid-container">
-        <!-- System Monitor -->
+        <!-- 1. File Scanner Task -->
         <div class="card">
-            <h3>📊 系统硬件与扫描引擎</h3>
-            <p style="margin: 12px 0; color: var(--text-muted);" id="db-status">4500万预置数据库检测中...</p>
-            <p style="margin-bottom: 16px; color: var(--text-muted);" id="cpu-status">硬件线程评估中...</p>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+                <h3>📁 本地音频全盘扫描</h3>
+                <span id="scan-percent-badge" class="badge">就绪</span>
+            </div>
+            <p style="margin: 8px 0; color: var(--text-muted);" id="db-status">4500万预置数据库检测中...</p>
+            <p style="margin-bottom: 14px; color: var(--text-muted);" id="cpu-status">硬件线程评估中...</p>
             <div style="display:flex; gap:10px;">
-                <button class="btn" onclick="startScan()">启动增量断点续扫</button>
+                <button class="btn" onclick="startScan()">启动增量断点扫描</button>
                 <button class="btn" style="background: var(--accent-red);" onclick="stopScan()">中止扫描</button>
             </div>
-            <div style="margin-top: 14px; width: 100%; background: rgba(255,255,255,0.1); height: 8px; border-radius: 4px; overflow: hidden;">
-                <div id="scan-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #a044ff, #00ff88); transition: width 0.3s ease;"></div>
+            <div class="progress-container">
+                <div id="scan-progress-bar" class="progress-bar"></div>
             </div>
-            <div style="margin-top: 12px; background: rgba(0,0,0,0.4); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 12px; height: 110px; overflow-y: auto; color: var(--text-main);" id="scan-log-box">
-                <div style="color: var(--text-muted);">系统日志控制台就绪...</div>
+            <div id="scan-log-box" class="log-box">
+                <div style="color: var(--text-muted);">文件扫描日志就绪...</div>
             </div>
         </div>
 
-        <!-- True Lossless Inspector -->
+        <!-- 2. Metadata & Lyric Batch Scraping Workstation -->
         <div class="card">
-            <h3>🟢 真假无损频谱体检</h3>
-            <input type="text" id="inspect-path" class="input-field" placeholder="输入音频文件绝对路径">
-            <button class="btn" onclick="inspectLossless()">开始 STFT 频谱检测</button>
-            <div id="inspect-result" style="margin-top: 14px; font-weight: 600;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+                <h3>🏷️ 5源聚合元数据与歌词刮削</h3>
+                <span id="scrape-percent-badge" class="badge">就绪</span>
+            </div>
+            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">网易云/QQ/酷狗/汽水/Apple Music 跨平台匹配与 ID3/FLAC 嵌入写回。</p>
+            <div style="display:flex; gap:10px; margin-bottom: 12px;">
+                <button class="btn" style="background: #a044ff;" onclick="startBatchScrape()">启动全库批量刮削</button>
+                <button class="btn" style="background: var(--accent-red);" onclick="stopBatchScrape()">中止刮削</button>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <input type="text" id="scrape-path" class="input-field" placeholder="单曲文件绝对路径 (单曲测试)" style="margin:0;">
+                <button class="btn" style="white-space:nowrap;" onclick="scrapeSingleTrack()">单曲刮削</button>
+            </div>
+            <div class="progress-container">
+                <div id="scrape-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #00d2ff, #a044ff);"></div>
+            </div>
+            <div id="scrape-log-box" class="log-box">
+                <div style="color: var(--text-muted);">刮削任务控制台就绪...</div>
+            </div>
         </div>
 
-        <!-- Deduplication Workstation -->
+        <!-- 3. Acoustic Vector Extraction & Qdrant Workstation -->
         <div class="card">
-            <h3>🧹 智能音频去重工作台</h3>
-            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">自动检测 MD5 重复及无损/高码率品质，智能判定保留高质版。</p>
-            <button class="btn" onclick="runDedupeScan()">扫描重复文件</button>
-            <div id="dedupe-results" style="margin-top: 14px; max-height: 200px; overflow-y: auto;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+                <h3>🧠 AI 声学向量提取与 Qdrant 索引</h3>
+                <span id="vector-percent-badge" class="badge">就绪</span>
+            </div>
+            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">基于 EmbeatMLP 模型提取 128 维声学 Embedding 向量并同步写入 Qdrant。</p>
+            <div style="display:flex; gap:10px; margin-bottom: 12px;">
+                <button class="btn" style="background: var(--accent-green); color:#000;" onclick="startVectorExtract()">启动 AI 声学向量提取</button>
+                <button class="btn" style="background: var(--accent-red);" onclick="stopVectorExtract()">中止提取</button>
+            </div>
+            <div class="progress-container">
+                <div id="vector-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #00ff88, #00d2ff);"></div>
+            </div>
+            <div id="vector-log-box" class="log-box">
+                <div style="color: var(--text-muted);">AI 向量特征提取控制台就绪...</div>
+            </div>
         </div>
 
-        <!-- Scraping Workstation -->
+        <!-- 4. True Lossless & Deduplication Inspector -->
         <div class="card">
-            <h3>🏷️ LDDC 歌词与元数据刮削工作台</h3>
-            <input type="text" id="scrape-path" class="input-field" placeholder="音频文件路径">
-            <button class="btn" onclick="scrapeSingleTrack()">单曲在线刮削并写入 ID3/LRC</button>
-            <div id="scrape-result" style="margin-top: 14px;"></div>
+            <h3>🟢 频谱体检与智能音频去重</h3>
+            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 8px;">基于 STFT 频谱识别 128k/320k 假无损 FLAC，自动推荐保留最高画质。</p>
+            <div style="display:flex; gap:6px; margin-bottom: 10px;">
+                <input type="text" id="inspect-path" class="input-field" placeholder="输入音频绝对路径" style="margin:0;">
+                <button class="btn" style="white-space:nowrap;" onclick="inspectLossless()">频谱体检</button>
+            </div>
+            <div id="inspect-result" style="margin-bottom: 10px; font-weight: 600; font-size:13px; color:var(--accent-green);"></div>
+            <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="runDedupeScan()">扫描重复文件</button>
+            <div id="dedupe-results" style="margin-top: 8px; max-height: 80px; overflow-y: auto; font-size:13px; color:var(--text-muted);"></div>
         </div>
     </div>
 
@@ -144,6 +192,32 @@
 
         let pollTimer = null;
 
+        function updateTaskUI(taskKey, taskData, barId, badgeId, logBoxId) {
+            if (!taskData) return;
+            const status = taskData.status || {};
+            const logs = taskData.logs || [];
+            
+            const bar = document.getElementById(barId);
+            const badge = document.getElementById(badgeId);
+            const logBox = document.getElementById(logBoxId);
+
+            if (logs.length > 0) {
+                logBox.innerHTML = logs.map(l => `<div style="padding: 2px 0;">${l}</div>`).join("");
+                logBox.scrollTop = logBox.scrollHeight;
+            }
+
+            if (status.is_running) {
+                const pct = status.percent || 5;
+                bar.style.width = pct + "%";
+                badge.innerText = `运行中 ${pct}%`;
+                badge.style.background = "var(--primary)";
+            } else {
+                bar.style.width = status.phase === 'done' ? "100%" : "0%";
+                badge.innerText = status.phase === 'done' ? "已完成 100%" : "就绪";
+                badge.style.background = status.phase === 'done' ? "var(--accent-green)" : "rgba(255,255,255,0.1)";
+            }
+        }
+
         async function loadAdminStatus() {
             try {
                 const res = await fetch("/api/admin/status", {
@@ -155,21 +229,24 @@
                 }
                 const data = await res.json();
                 document.getElementById("db-status").innerText = data.has_global_db ? "🟢 4500万预置数据库: 已就绪 (使能加速比对)" : "⚪ 纯本地轻量模式: 运行中";
-                document.getElementById("cpu-status").innerText = `逻辑 CPU 核心: ${data.cpu.total_cpus} 核 | 硬件限制并发: ${data.cpu.max_workers} 线程 (保留1核防卡顿)`;
+                document.getElementById("cpu-status").innerText = `CPU 核心: ${data.cpu.total_cpus} 核 | 硬件并发: ${data.cpu.max_workers} 线程`;
 
-                const logBox = document.getElementById("scan-log-box");
-                if (data.logs && data.logs.length > 0) {
-                    logBox.innerHTML = data.logs.map(l => `<div style="padding: 2px 0;">${l}</div>`).join("");
-                    logBox.scrollTop = logBox.scrollHeight;
-                }
+                // Update Scan task
+                updateTaskUI("scan", data.scan || { status: data.status, logs: data.logs }, "scan-progress-bar", "scan-percent-badge", "scan-log-box");
 
-                const progressBar = document.getElementById("scan-progress-bar");
-                if (data.status && data.status.is_running) {
-                    const pct = data.status.percent || 10;
-                    progressBar.style.width = pct + "%";
+                // Update Scrape task
+                updateTaskUI("scrape", data.scrape, "scrape-progress-bar", "scrape-percent-badge", "scrape-log-box");
+
+                // Update Vector task
+                updateTaskUI("vector", data.vector, "vector-progress-bar", "vector-percent-badge", "vector-log-box");
+
+                const isAnyRunning = (data.scan && data.scan.status.is_running) ||
+                                     (data.scrape && data.scrape.status.is_running) ||
+                                     (data.vector && data.vector.status.is_running);
+
+                if (isAnyRunning) {
                     if (!pollTimer) pollTimer = setInterval(loadAdminStatus, 1500);
                 } else {
-                    progressBar.style.width = (data.status && data.status.phase === 'done') ? "100%" : "0%";
                     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
                 }
             } catch (err) {
@@ -177,10 +254,11 @@
             }
         }
 
+        // 1. Scan Task Actions
         async function startScan() {
             const res = await fetch("/api/scan/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
             const data = await res.json();
-            alert(data.message || "扫描已启动！");
+            alert(data.message || "扫描任务已启动！");
             loadAdminStatus();
         }
 
@@ -189,8 +267,47 @@
             loadAdminStatus();
         }
 
+        // 2. Batch Scrape Actions
+        async function startBatchScrape() {
+            const res = await fetch("/api/scrape/batch/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
+            const data = await res.json();
+            alert(data.message || "批量刮削任务已启动！");
+            loadAdminStatus();
+        }
+
+        async function stopBatchScrape() {
+            await fetch("/api/scrape/batch/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
+            loadAdminStatus();
+        }
+
+        async function scrapeSingleTrack() {
+            const path = document.getElementById("scrape-path").value;
+            if (!path) { alert("请输入音频文件路径"); return; }
+            const res = await fetch(`/api/scrape/track?path=${encodeURIComponent(path)}`, {
+                method: "POST", headers: { "X-Admin-Token": adminToken }
+            });
+            const data = await res.json();
+            alert(data.status === "ok" ? "✓ 单曲在线刮削并嵌入成功！" : "✗ 刮削失败");
+            loadAdminStatus();
+        }
+
+        // 3. Vector Extract Actions
+        async function startVectorExtract() {
+            const res = await fetch("/api/vector/extract/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
+            const data = await res.json();
+            alert(data.message || "AI 声学向量提取已启动！");
+            loadAdminStatus();
+        }
+
+        async function stopVectorExtract() {
+            await fetch("/api/vector/extract/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
+            loadAdminStatus();
+        }
+
+        // 4. Quality & Dedupe Actions
         async function inspectLossless() {
             const path = document.getElementById("inspect-path").value;
+            if (!path) { alert("请输入音频文件路径"); return; }
             const res = await fetch(`/api/quality/analyze?path=${encodeURIComponent(path)}`, {
                 method: "POST", headers: { "X-Admin-Token": adminToken }
             });
@@ -201,16 +318,7 @@
         async function runDedupeScan() {
             const res = await fetch("/api/dedupe/scan", { headers: { "X-Admin-Token": adminToken } });
             const data = await res.json();
-            document.getElementById("dedupe-results").innerText = `发现 ${data.length} 组重复文件。`;
-        }
-
-        async function scrapeSingleTrack() {
-            const path = document.getElementById("scrape-path").value;
-            const res = await fetch(`/api/scrape/track?path=${encodeURIComponent(path)}`, {
-                method: "POST", headers: { "X-Admin-Token": adminToken }
-            });
-            const data = await res.json();
-            document.getElementById("scrape-result").innerText = data.status === "ok" ? "✓ 刮削并嵌入成功！" : "✗ 刮削失败";
+            document.getElementById("dedupe-results").innerText = `检测发现 ${data.length} 组重复音频。`;
         }
     </script>
 </body>

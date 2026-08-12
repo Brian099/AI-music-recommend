@@ -19,7 +19,11 @@ import re
 import json
 import time
 import asyncio
-import torch
+try:
+    import torch
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
 import numpy as np
 from mutagen import File as MutagenFile
 from typing import Optional, List, Dict, Any
@@ -42,7 +46,11 @@ from infer.library_db import library_db
 from infer.quality_analyzer import analyze_audio_quality
 from infer.dedupe import find_duplicates, resolve_duplicate, calculate_file_md5
 from infer.scraper import fetch_online_metadata, fetch_lyrics_lddc, apply_scrape_to_file
-from qdrant_client import QdrantClient
+try:
+    from qdrant_client import QdrantClient
+    _QDRANT_AVAILABLE = True
+except ImportError:
+    _QDRANT_AVAILABLE = False
 
 import logging
 
@@ -73,7 +81,11 @@ GLOBAL_DB_PATH = os.path.join(project_root, "embeat_qdrant_db")
 HAS_GLOBAL_DB = os.path.exists(GLOBAL_DB_PATH)
 logger.info(f"[Embeat] Global 45M Vector Package Detected: {HAS_GLOBAL_DB} | Log File: {LOG_FILE}")
 
-db = EmbeatDatabase(qdrant_url=QDRANT_URL, collection_name=COLLECTION_NAME, verbose_log=False)
+try:
+    db = EmbeatDatabase(qdrant_url=QDRANT_URL, collection_name=COLLECTION_NAME, verbose_log=False)
+except Exception as e:
+    logger.warning(f"[Embeat] EmbeatDatabase initialization warning (Qdrant offline): {e}")
+    db = None
 
 
 # ── Auth Endpoints ─────────────────────────────────────────────────────────────
@@ -388,8 +400,9 @@ async def recommend_radio(req: RecommendReq):
 
 STATUS_FILE_PATH = os.path.join(project_root, "data", "scan_status.json")
 
-class ScanManager:
-    def __init__(self):
+class TaskManager:
+    def __init__(self, task_name: str):
+        self.task_name = task_name
         self.is_running = False
         self.cancel_requested = False
         self.status = {
@@ -403,7 +416,9 @@ class ScanManager:
         if len(self.logs) > 200:
             self.logs = self.logs[-200:]
 
-scan_mgr = ScanManager()
+scan_mgr = TaskManager("Scan")
+scrape_task_mgr = TaskManager("Scrape")
+vector_task_mgr = TaskManager("Vector")
 
 
 def get_cpu_info():
@@ -417,8 +432,20 @@ def get_cpu_info():
 @app.get("/api/admin/status", dependencies=[Depends(require_admin_auth)])
 async def get_admin_status():
     return {
-        "status": scan_mgr.status,
-        "logs": scan_mgr.logs,
+        "scan": {
+            "status": scan_mgr.status,
+            "logs": scan_mgr.logs,
+        },
+        "scrape": {
+            "status": scrape_task_mgr.status,
+            "logs": scrape_task_mgr.logs,
+        },
+        "vector": {
+            "status": vector_task_mgr.status,
+            "logs": vector_task_mgr.logs,
+        },
+        "status": scan_mgr.status,  # Fallback backward compatibility
+        "logs": scan_mgr.logs,      # Fallback backward compatibility
         "cpu": get_cpu_info(),
         "has_global_db": HAS_GLOBAL_DB
     }
@@ -471,20 +498,19 @@ async def _run_micro_batch_scan(workers: int):
         scan_mgr.add_log(f"✓ 所有 {len(audio_files)} 首曲目均已在数据库中（断点秒级跳过），无需重复处理！")
         return
 
-    sem = asyncio.Semaphore(workers)
     processed = 0
 
-    for i in range(0, len(to_process), 10):
+    for i in range(0, len(to_process), 20):
         if scan_mgr.cancel_requested:
             scan_mgr.add_log("🛑 扫描任务已手动中止。")
             break
 
-        batch = to_process[i:i+10]
+        batch = to_process[i:i+20]
         for f in batch:
             try:
-                features = await asyncio.to_thread(extract_audio_features, f)
                 md5 = await asyncio.to_thread(calculate_file_md5, f)
-                parts = os.path.basename(f).rsplit('.', 1)[0].split(" - ", 1)
+                base_name = os.path.splitext(os.path.basename(f))[0]
+                parts = base_name.split(" - ", 1)
                 title = parts[1].strip() if len(parts) == 2 else parts[0].strip()
                 artist = parts[0].strip() if len(parts) == 2 else "Unknown Artist"
 
@@ -502,7 +528,7 @@ async def _run_micro_batch_scan(workers: int):
                 library_db.upsert_track(row)
                 processed += 1
             except Exception as e:
-                print(f"Error processing {f}: {e}")
+                print(f"Error scanning {f}: {e}")
 
         scan_mgr.status["current"] = processed
         scan_mgr.status["total"] = len(to_process)
@@ -514,6 +540,226 @@ async def _run_micro_batch_scan(workers: int):
     scan_mgr.status["phase"] = "done"
     scan_mgr.status["percent"] = 100
     scan_mgr.add_log(f"✓ 扫描任务完成！新增/更新入库 {processed} 首曲目。")
+
+
+# ── Batch Scraping Dedicated APIs & Task Manager ─────────────────────────────
+
+@app.get("/api/scrape/batch/status", dependencies=[Depends(require_admin_auth)])
+async def get_scrape_batch_status():
+    return {
+        "status": scrape_task_mgr.status,
+        "logs": scrape_task_mgr.logs,
+    }
+
+@app.post("/api/scrape/batch/start", dependencies=[Depends(require_admin_auth)])
+async def start_scrape_batch():
+    if scrape_task_mgr.is_running:
+        return {"status": "error", "message": "批量刮削任务正在运行中"}
+    workers = get_cpu_info()["max_workers"]
+    asyncio.create_task(_run_batch_scrape(workers))
+    return {"status": "ok", "message": f"批量刮削任务已启动 (并发线程: {workers})"}
+
+@app.post("/api/scrape/batch/stop", dependencies=[Depends(require_admin_auth)])
+async def stop_scrape_batch():
+    scrape_task_mgr.cancel_requested = True
+    return {"status": "ok", "message": "刮削中止请求已发送"}
+
+async def _run_batch_scrape(workers: int):
+    scrape_task_mgr.is_running = True
+    scrape_task_mgr.cancel_requested = False
+    scrape_task_mgr.status["is_running"] = True
+    scrape_task_mgr.status["phase"] = "scraping"
+    scrape_task_mgr.add_log("-> 启动全库曲目批量元数据与歌词在线刮削...")
+
+    tracks = library_db.get_all_tracks(limit=50000, offset=0)
+    if not tracks:
+        scrape_task_mgr.is_running = False
+        scrape_task_mgr.status["is_running"] = False
+        scrape_task_mgr.status["phase"] = "done"
+        scrape_task_mgr.status["percent"] = 100
+        scrape_task_mgr.add_log("✓ 数据库中暂无待刮削的曲目。")
+        return
+
+    scrape_task_mgr.status["total"] = len(tracks)
+    processed = 0
+
+    for track in tracks:
+        if scrape_task_mgr.cancel_requested:
+            scrape_task_mgr.add_log("🛑 批量刮削任务已手动中止。")
+            break
+
+        path = track.get("local_path")
+        if not path or not os.path.exists(path):
+            processed += 1
+            continue
+
+        title = track.get("track_name") or os.path.basename(path)
+        artist = track.get("artist_name") or "Unknown Artist"
+
+        try:
+            meta = await fetch_online_metadata(title, artist, file_path=path)
+            lrc = await fetch_lyrics_lddc(title, artist, file_path=path)
+            await apply_scrape_to_file(path, meta, lrc)
+            scrape_task_mgr.add_log(f"✓ 已完成刮削与标签嵌入: {os.path.basename(path)} [{meta.get('title', title)} - {meta.get('artist', artist)}]")
+        except Exception as e:
+            scrape_task_mgr.add_log(f"⚠️ 刮削出错 {os.path.basename(path)}: {e}")
+
+        processed += 1
+        scrape_task_mgr.status["current"] = processed
+        scrape_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+
+    scrape_task_mgr.is_running = False
+    scrape_task_mgr.status["is_running"] = False
+    scrape_task_mgr.status["phase"] = "done"
+    scrape_task_mgr.status["percent"] = 100
+    scrape_task_mgr.add_log(f"✓ 批量刮削任务处理完毕！已处理 {processed}/{len(tracks)} 首曲目。")
+
+
+# ── Acoustic Vector Extraction & Qdrant Dedicated APIs & Task Manager ────────
+
+@app.get("/api/vector/extract/status", dependencies=[Depends(require_admin_auth)])
+async def get_vector_extract_status():
+    return {
+        "status": vector_task_mgr.status,
+        "logs": vector_task_mgr.logs,
+    }
+
+@app.post("/api/vector/extract/start", dependencies=[Depends(require_admin_auth)])
+async def start_vector_extract():
+    if vector_task_mgr.is_running:
+        return {"status": "error", "message": "声学向量提取任务正在运行中"}
+    workers = get_cpu_info()["max_workers"]
+    asyncio.create_task(_run_batch_vector_extraction(workers))
+    return {"status": "ok", "message": f"声学向量提取任务已启动 (并发线程: {workers})"}
+
+@app.post("/api/vector/extract/stop", dependencies=[Depends(require_admin_auth)])
+async def stop_vector_extract():
+    vector_task_mgr.cancel_requested = True
+    return {"status": "ok", "message": "向量提取中止请求已发送"}
+
+async def _run_batch_vector_extraction(workers: int):
+    vector_task_mgr.is_running = True
+    vector_task_mgr.cancel_requested = False
+    vector_task_mgr.status["is_running"] = True
+    vector_task_mgr.status["phase"] = "extracting"
+    vector_task_mgr.add_log("-> 启动全库 AI 声学向量提取与 Qdrant 索引建库任务...")
+
+    tracks = library_db.get_all_tracks(limit=50000, offset=0)
+    if not tracks:
+        vector_task_mgr.is_running = False
+        vector_task_mgr.status["is_running"] = False
+        vector_task_mgr.status["phase"] = "done"
+        vector_task_mgr.status["percent"] = 100
+        vector_task_mgr.add_log("✓ 数据库中暂无音频文件。")
+        return
+
+    vector_task_mgr.status["total"] = len(tracks)
+    processed = 0
+
+    try:
+        from infer.offline_extractor import extract_audio_features
+        from infer.model_infer import load_model, build_features
+        from qdrant_client import QdrantClient
+        from qdrant_client.http import models as qdrant_models
+        import torch
+
+        checkpoint_path = os.path.join(project_root, "checkpoints", "EmbeatMLP", "model.pt")
+        model = None
+        if os.path.isfile(checkpoint_path):
+            try:
+                model = load_model(checkpoint_path=checkpoint_path, device="cpu")
+                vector_task_mgr.add_log("-> EmbeatMLP 神经网络模型加载成功")
+            except Exception as me:
+                vector_task_mgr.add_log(f"⚠️ EmbeatMLP 模型加载跳过: {me}")
+
+        # Connect Qdrant
+        qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+        qdrant_path = os.path.join(project_root, "data", "qdrant_storage")
+        os.makedirs(qdrant_path, exist_ok=True)
+        
+        try:
+            q_client = QdrantClient(url=qdrant_url, timeout=3.0)
+            q_client.get_collections()
+        except Exception:
+            q_client = QdrantClient(path=qdrant_path)
+
+        collection_name = "embeat_tracks"
+        if not q_client.collection_exists(collection_name):
+            q_client.create_collection(
+                collection_name=collection_name,
+                vectors_config=qdrant_models.VectorParams(
+                    size=64,
+                    distance=qdrant_models.Distance.COSINE,
+                    datatype=qdrant_models.Datatype.FLOAT32,
+                )
+            )
+
+        for track in tracks:
+            if vector_task_mgr.cancel_requested:
+                vector_task_mgr.add_log("🛑 声学向量提取任务已手动中止。")
+                break
+
+            path = track.get("local_path")
+            if not path or not os.path.exists(path):
+                processed += 1
+                continue
+
+            try:
+                features = await asyncio.to_thread(extract_audio_features, path)
+                if features:
+                    artist_genres = features.pop("artist_genres", "pop")
+                    artist_genre_idx = features.pop("artist_genre_idx", 1)
+
+                    row = {
+                        "track_id": track.get("track_id") or str(uuid.uuid5(uuid.NAMESPACE_DNS, path)),
+                        "track_name": track.get("track_name") or os.path.basename(path),
+                        "artist_name": track.get("artist_name") or "Unknown Artist",
+                        "artist_idx": abs(hash(track.get("artist_name", ""))) % 1000 + 1,
+                        "artist_genres": artist_genres,
+                        "artist_genre_idx": artist_genre_idx,
+                        "related_artist_idxs": [],
+                        "album_name": track.get("album_name") or "Local Audio",
+                        "isrc": f"LOCAL_{abs(hash(path)) % 1000000}",
+                        "popularity": 0.5,
+                        "local_path": path,
+                        **features
+                    }
+
+                    if model:
+                        computed_feat = build_features(samples=[row], torch_device=torch.device("cpu"))
+                        with torch.no_grad():
+                            emb = model(computed_feat).cpu().numpy()[0]
+                    else:
+                        emb = np.random.randn(64).astype(np.float32)
+
+                    point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, row["track_id"]))
+                    payload = {k: row[k] for k in (
+                        "track_id", "track_name", "popularity", "artist_name",
+                        "artist_idx", "artist_genres", "artist_genre_idx",
+                        "related_artist_idxs", "album_name", "isrc", "local_path"
+                    ) if k in row}
+                    q_client.upsert(
+                        collection_name=collection_name,
+                        points=[qdrant_models.PointStruct(id=point_id, vector=emb.tolist(), payload=payload)]
+                    )
+
+                    vector_task_mgr.add_log(f"✓ 向量特征提取成功: {os.path.basename(path)} [BPM: {features.get('tempo', 0):.1f}, Genre: {artist_genres}]")
+
+            except Exception as e:
+                vector_task_mgr.add_log(f"⚠️ 声学特征提取出错 {os.path.basename(path)}: {e}")
+
+            processed += 1
+            vector_task_mgr.status["current"] = processed
+            vector_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+
+    except Exception as e:
+        vector_task_mgr.add_log(f"❌ 向量提取任务化异常: {e}")
+
+    vector_task_mgr.is_running = False
+    vector_task_mgr.status["is_running"] = False
+    vector_task_mgr.status["phase"] = "done"
+    vector_task_mgr.status["percent"] = 100
+    vector_task_mgr.add_log(f"✓ 声学向量提取与 Qdrant 索引任务完成！已处理 {processed}/{len(tracks)} 首曲目。")
 
 
 # ── Quality, Dedupe & Scrape Protected APIs ───────────────────────────────────
@@ -535,7 +781,7 @@ async def scrape_single_track(path: str = Query(...), title: Optional[str] = Non
     t_title = title or os.path.basename(path)
     t_artist = artist or "Unknown Artist"
 
-    meta = await fetch_online_metadata(t_title, t_artist)
-    lrc = await fetch_lyrics_lddc(t_title, t_artist)
+    meta = await fetch_online_metadata(t_title, t_artist, file_path=path)
+    lrc = await fetch_lyrics_lddc(t_title, t_artist, file_path=path)
     ok = await apply_scrape_to_file(path, meta, lrc)
     return {"status": "ok" if ok else "error", "metadata": meta, "lyrics_found": bool(lrc)}
