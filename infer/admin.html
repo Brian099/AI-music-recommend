@@ -10,9 +10,11 @@
     <style>
         :root {
             --primary: #a044ff;
+            --primary-hover: #b462ff;
             --bg-gradient: linear-gradient(135deg, #0a0618 0%, #12082b 50%, #040209 100%);
             --glass-bg: rgba(255, 255, 255, 0.04);
             --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-active: rgba(160, 68, 255, 0.18);
             --text-main: #f5f5f7;
             --text-muted: #a1a1a6;
             --accent-green: #00ff88;
@@ -23,52 +25,136 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: 'Outfit', sans-serif;
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: var(--bg-gradient); color: var(--text-main);
-            min-height: 100vh; padding: 20px 40px;
+            min-height: 100vh; display: flex; overflow: hidden;
         }
 
-        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-        .logo { font-size: 22px; font-weight: 700; color: var(--primary); }
+        /* ── Left Sidebar Layout ────────────────────────────────── */
+        .admin-sidebar {
+            width: 290px;
+            background: rgba(10, 6, 24, 0.7);
+            border-right: 1px solid var(--glass-border);
+            backdrop-filter: blur(20px);
+            display: flex; flex-direction: column;
+            padding: 24px 18px;
+            z-index: 10;
+        }
 
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .card {
+        .sidebar-logo {
+            font-size: 20px; font-weight: 700; color: var(--text-main);
+            display: flex; align-items: center; gap: 10px; margin-bottom: 20px;
+        }
+        .sidebar-logo span {
+            background: linear-gradient(135deg, #a044ff, #00d2ff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+
+        .sys-card {
             background: var(--glass-bg); border: 1px solid var(--glass-border);
-            border-radius: 16px; padding: 24px; backdrop-filter: blur(20px);
+            border-radius: 12px; padding: 12px; margin-bottom: 20px; font-size: 12px;
         }
+        .sys-card p { margin-bottom: 6px; color: var(--text-muted); }
+        .sys-card p:last-child { margin-bottom: 0; }
+
+        .nav-menu {
+            display: flex; flex-direction: column; gap: 8px; flex: 1;
+        }
+
+        .nav-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 16px; border-radius: 12px; font-weight: 600; font-size: 14px;
+            color: var(--text-muted); cursor: pointer; transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+        .nav-item:hover {
+            color: var(--text-main); background: rgba(255, 255, 255, 0.05);
+        }
+        .nav-item.active {
+            color: #fff; background: var(--glass-active);
+            border-color: rgba(160, 68, 255, 0.4);
+            box-shadow: 0 4px 20px rgba(160, 68, 255, 0.2);
+        }
+        .nav-item .nav-icon { font-size: 18px; }
+
+        .sidebar-footer {
+            margin-top: auto; padding-top: 16px; border-top: 1px solid var(--glass-border);
+        }
+
+        /* ── Right Main Workspace Layout ────────────────────────── */
+        .admin-main {
+            flex: 1; display: flex; flex-direction: column;
+            padding: 28px 36px; overflow-y: auto; height: 100vh;
+        }
+
+        .view-panel {
+            display: none; flex-direction: column; gap: 16px; flex: 1;
+            animation: fadeIn 0.25s ease-in-out;
+        }
+        .view-panel.active { display: flex; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .panel-card {
+            background: var(--glass-bg); border: 1px solid var(--glass-border);
+            border-radius: 18px; padding: 24px; backdrop-filter: blur(20px);
+            display: flex; flex-direction: column; flex: 1;
+        }
+
+        .panel-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--glass-border);
+        }
+        .panel-title { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
 
         .btn {
-            padding: 8px 18px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer;
-            background: var(--primary); color: white; transition: all 0.2s;
+            padding: 10px 20px; border-radius: 10px; border: none; font-weight: 600; font-size: 13px;
+            cursor: pointer; background: var(--primary); color: white; transition: all 0.2s;
+            display: inline-flex; align-items: center; gap: 6px;
         }
-        .btn:hover { opacity: 0.9; }
+        .btn:hover { background: var(--primary-hover); transform: translateY(-1px); }
+
+        .input-field {
+            width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--glass-border);
+            background: rgba(0, 0, 0, 0.3); color: white; font-size: 13px; outline: none;
+            transition: border 0.2s;
+        }
+        .input-field:focus { border-color: var(--primary); }
+
+        .badge {
+            font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px;
+            background: rgba(255,255,255,0.1); color: var(--text-main);
+        }
+
+        .progress-container {
+            width: 100%; background: rgba(255,255,255,0.08); height: 8px; border-radius: 4px;
+            overflow: hidden; margin: 16px 0 12px 0;
+        }
+        .progress-bar {
+            width: 0%; height: 100%; background: linear-gradient(90deg, #a044ff, #00ff88);
+            transition: width 0.3s ease;
+        }
+
+        .log-box {
+            background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border);
+            border-radius: 12px; padding: 16px; font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px; line-height: 1.6; flex: 1; min-height: 380px; max-height: 520px;
+            overflow-y: auto; color: #e0e0e0; margin-top: 12px;
+        }
 
         /* Login Modal */
         #login-modal {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); backdrop-filter: blur(10px);
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(12px);
             display: flex; justify-content: center; align-items: center; z-index: 1000;
         }
         .modal-box {
-            background: #150a33; border: 1px solid var(--glass-border);
-            padding: 30px; border-radius: 16px; width: 340px; text-align: center;
-        }
-        .input-field {
-            width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--glass-border);
-            background: rgba(255,255,255,0.05); color: white; margin: 12px 0;
-        }
-        .badge {
-            font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,0.1);
-        }
-        .progress-container {
-            margin-top: 14px; width: 100%; background: rgba(255,255,255,0.1); height: 8px; border-radius: 4px; overflow: hidden;
-        }
-        .progress-bar {
-            width: 0%; height: 100%; background: linear-gradient(90deg, #a044ff, #00ff88); transition: width 0.3s ease;
-        }
-        .log-box {
-            margin-top: 12px; background: rgba(0,0,0,0.4); border-radius: 8px; padding: 10px;
-            font-family: monospace; font-size: 12px; height: 110px; overflow-y: auto; color: var(--text-main);
+            background: #12082b; border: 1px solid var(--glass-border);
+            padding: 36px; border-radius: 20px; width: 360px; text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
         }
     </style>
 </head>
@@ -76,92 +162,159 @@
 
     <div id="login-modal">
         <div class="modal-box">
-            <h3>🔒 管理员身份认证</h3>
-            <input type="password" id="admin-pass" class="input-field" placeholder="请输入管理员密码 (默认 admin123)">
-            <button class="btn" style="width: 100%;" onclick="doLogin()">进入管理后台</button>
+            <h3 style="font-size: 20px; margin-bottom: 8px;">🔒 管理员身份认证</h3>
+            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">请输入 Embeat 控制台访问密码</p>
+            <input type="password" id="admin-pass" class="input-field" placeholder="默认密码 admin123" style="margin-bottom: 16px;">
+            <button class="btn" style="width: 100%; justify-content: center;" onclick="doLogin()">进入管理后台</button>
         </div>
     </div>
 
-    <header>
-        <div class="logo">⚙️ Embeat 管理后台控制中心</div>
-        <a href="/" class="btn" style="background: rgba(255,255,255,0.1);">返回播放器前台</a>
-    </header>
+    <!-- ── Left Sidebar Menu ──────────────────────────────────────── -->
+    <div class="admin-sidebar">
+        <div class="sidebar-logo">
+            <span>⚙️ Embeat</span> 控制中心
+        </div>
 
-    <div class="grid-container">
-        <!-- 1. File Scanner Task -->
-        <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
-                <h3>📁 本地音频全盘扫描</h3>
-                <span id="scan-percent-badge" class="badge">就绪</span>
+        <div class="sys-card">
+            <p id="db-status">🟢 数据库检测中...</p>
+            <p id="cpu-status">⚙️ 硬件评估中...</p>
+        </div>
+
+        <div class="nav-menu">
+            <div class="nav-item active" id="nav-scan" onclick="switchTab('scan')">
+                <span class="nav-icon">📁</span>
+                <span>本地全盘扫描</span>
             </div>
-            <p style="margin: 8px 0; color: var(--text-muted);" id="db-status">4500万预置数据库检测中...</p>
-            <p style="margin-bottom: 14px; color: var(--text-muted);" id="cpu-status">硬件线程评估中...</p>
-            <div style="display:flex; gap:10px;">
-                <button class="btn" onclick="startScan()">启动增量断点扫描</button>
-                <button class="btn" style="background: var(--accent-red);" onclick="stopScan()">中止扫描</button>
+            <div class="nav-item" id="nav-scrape" onclick="switchTab('scrape')">
+                <span class="nav-icon">🏷️</span>
+                <span>元数据与歌词刮削</span>
             </div>
-            <div class="progress-container">
-                <div id="scan-progress-bar" class="progress-bar"></div>
+            <div class="nav-item" id="nav-vector" onclick="switchTab('vector')">
+                <span class="nav-icon">🧠</span>
+                <span>AI 声学向量提取</span>
             </div>
-            <div id="scan-log-box" class="log-box">
-                <div style="color: var(--text-muted);">文件扫描日志就绪...</div>
+            <div class="nav-item" id="nav-dedupe" onclick="switchTab('dedupe')">
+                <span class="nav-icon">🟢</span>
+                <span>频谱体检与去重</span>
             </div>
         </div>
 
-        <!-- 2. Metadata & Lyric Batch Scraping Workstation -->
-        <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
-                <h3>🏷️ 5源聚合元数据与歌词刮削</h3>
-                <span id="scrape-percent-badge" class="badge">就绪</span>
-            </div>
-            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">网易云/QQ/酷狗/汽水/Apple Music 跨平台匹配与 ID3/FLAC 嵌入写回。</p>
-            <div style="display:flex; gap:10px; margin-bottom: 12px;">
-                <button class="btn" style="background: #a044ff;" onclick="startBatchScrape()">启动全库批量刮削</button>
-                <button class="btn" style="background: var(--accent-red);" onclick="stopBatchScrape()">中止刮削</button>
-            </div>
-            <div style="display:flex; gap:6px;">
-                <input type="text" id="scrape-path" class="input-field" placeholder="单曲文件绝对路径 (单曲测试)" style="margin:0;">
-                <button class="btn" style="white-space:nowrap;" onclick="scrapeSingleTrack()">单曲刮削</button>
-            </div>
-            <div class="progress-container">
-                <div id="scrape-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #00d2ff, #a044ff);"></div>
-            </div>
-            <div id="scrape-log-box" class="log-box">
-                <div style="color: var(--text-muted);">刮削任务控制台就绪...</div>
+        <div class="sidebar-footer">
+            <a href="/" class="btn" style="background: rgba(255,255,255,0.08); width: 100%; justify-content: center;">↩️ 返回播放器前台</a>
+        </div>
+    </div>
+
+    <!-- ── Right Main Workspace Panels ────────────────────────────── -->
+    <div class="admin-main">
+
+        <!-- 1. Full Scan View Panel -->
+        <div class="view-panel active" id="view-scan">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title">📁 本地音频全盘扫描</div>
+                    <span id="scan-percent-badge" class="badge">就绪</span>
+                </div>
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+                    递归扫描音乐根目录下的所有音频文件，生成哈希与结构索引并建立 SQLite 本地库档案。支持毫秒级增量断点跳过。
+                </p>
+                <div style="display:flex; gap:12px; margin-bottom: 12px;">
+                    <button class="btn" onclick="startScan()">启动增量断点扫描</button>
+                    <button class="btn" style="background: var(--accent-red);" onclick="stopScan()">中止扫描</button>
+                </div>
+                <div class="progress-container">
+                    <div id="scan-progress-bar" class="progress-bar"></div>
+                </div>
+                <div id="scan-log-box" class="log-box">
+                    <div style="color: var(--text-muted);">文件扫描日志控制台就绪...</div>
+                </div>
             </div>
         </div>
 
-        <!-- 3. Acoustic Vector Extraction & Qdrant Workstation -->
-        <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
-                <h3>🧠 AI 声学向量提取与 Qdrant 索引</h3>
-                <span id="vector-percent-badge" class="badge">就绪</span>
-            </div>
-            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">基于 EmbeatMLP 模型提取 128 维声学 Embedding 向量并同步写入 Qdrant。</p>
-            <div style="display:flex; gap:10px; margin-bottom: 12px;">
-                <button class="btn" style="background: var(--accent-green); color:#000;" onclick="startVectorExtract()">启动 AI 声学向量提取</button>
-                <button class="btn" style="background: var(--accent-red);" onclick="stopVectorExtract()">中止提取</button>
-            </div>
-            <div class="progress-container">
-                <div id="vector-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #00ff88, #00d2ff);"></div>
-            </div>
-            <div id="vector-log-box" class="log-box">
-                <div style="color: var(--text-muted);">AI 向量特征提取控制台就绪...</div>
+        <!-- 2. Metadata Scrape View Panel -->
+        <div class="view-panel" id="view-scrape">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title">🏷️ 5源聚合元数据与歌词刮削</div>
+                    <span id="scrape-percent-badge" class="badge">就绪</span>
+                </div>
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">
+                    整合网易云音乐、QQ音乐、酷狗、汽水及 Apple Music，跨平台补全高精专辑大图与 LRC 歌词，智能回写入 ID3/FLAC 标签。
+                </p>
+                <div style="display:flex; gap:12px; margin-bottom: 16px;">
+                    <button class="btn" style="background: #a044ff;" onclick="startBatchScrape()">启动全库批量刮削</button>
+                    <button class="btn" style="background: var(--accent-red);" onclick="stopBatchScrape()">中止刮削</button>
+                </div>
+                
+                <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); padding: 14px; border-radius: 12px; margin-bottom: 14px;">
+                    <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">单曲路径手动测试</div>
+                    <div style="display:flex; gap:8px;">
+                        <input type="text" id="scrape-path" class="input-field" placeholder="输入音频文件绝对路径 (例如 D:\music\test.flac)">
+                        <button class="btn" style="white-space:nowrap;" onclick="scrapeSingleTrack()">单曲刮削</button>
+                    </div>
+                </div>
+
+                <div class="progress-container">
+                    <div id="scrape-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #00d2ff, #a044ff);"></div>
+                </div>
+                <div id="scrape-log-box" class="log-box">
+                    <div style="color: var(--text-muted);">刮削任务控制台就绪...</div>
+                </div>
             </div>
         </div>
 
-        <!-- 4. True Lossless & Deduplication Inspector -->
-        <div class="card">
-            <h3>🟢 频谱体检与智能音频去重</h3>
-            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 8px;">基于 STFT 频谱识别 128k/320k 假无损 FLAC，自动推荐保留最高画质。</p>
-            <div style="display:flex; gap:6px; margin-bottom: 10px;">
-                <input type="text" id="inspect-path" class="input-field" placeholder="输入音频绝对路径" style="margin:0;">
-                <button class="btn" style="white-space:nowrap;" onclick="inspectLossless()">频谱体检</button>
+        <!-- 3. AI Acoustic Vector View Panel -->
+        <div class="view-panel" id="view-vector">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title">🧠 AI 声学向量提取与 Qdrant 索引</div>
+                    <span id="vector-percent-badge" class="badge">就绪</span>
+                </div>
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">
+                    基于 EmbeatMLP 神经网络模型提取 128 维声学 Embedding 向量，同步批量写入 Qdrant 向量数据库，驱动 AI 漫游电台。
+                </p>
+                <div style="display:flex; gap:12px; margin-bottom: 16px;">
+                    <button class="btn" style="background: var(--accent-green); color:#000;" onclick="startVectorExtract()">启动 AI 声学向量提取</button>
+                    <button class="btn" style="background: var(--accent-red);" onclick="stopVectorExtract()">中止提取</button>
+                </div>
+                <div class="progress-container">
+                    <div id="vector-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #00ff88, #00d2ff);"></div>
+                </div>
+                <div id="vector-log-box" class="log-box">
+                    <div style="color: var(--text-muted);">AI 向量特征提取控制台就绪...</div>
+                </div>
             </div>
-            <div id="inspect-result" style="margin-bottom: 10px; font-weight: 600; font-size:13px; color:var(--accent-green);"></div>
-            <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="runDedupeScan()">扫描重复文件</button>
-            <div id="dedupe-results" style="margin-top: 10px; max-height: 320px; overflow-y: auto; font-size:13px; color:var(--text-muted);"></div>
         </div>
+
+        <!-- 4. Dedupe & Lossless Inspector View Panel -->
+        <div class="view-panel" id="view-dedupe">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title">🟢 频谱体检与智能音频去重</div>
+                </div>
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">
+                    基于 STFT 频谱判定假无损 FLAC，并通过 MD5 物理哈希与模糊归一化算法，智能保留高品质音乐、移走重复低画质副本。
+                </p>
+
+                <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); padding: 14px; border-radius: 12px; margin-bottom: 16px;">
+                    <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">单曲 STFT 频谱体检</div>
+                    <div style="display:flex; gap:8px;">
+                        <input type="text" id="inspect-path" class="input-field" placeholder="输入音频文件绝对路径 (例如 D:\music\test.flac)">
+                        <button class="btn" style="white-space:nowrap;" onclick="inspectLossless()">频谱体检</button>
+                    </div>
+                    <div id="inspect-result" style="margin-top: 8px; font-weight: 600; font-size:13px; color:var(--accent-green);"></div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                    <span style="font-weight: 600; font-size: 15px;">重复音频扫描与比对</span>
+                    <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="runDedupeScan()">扫描重复文件</button>
+                </div>
+                
+                <div id="dedupe-results" style="flex:1; min-height: 280px; max-height: 480px; overflow-y: auto; font-size:13px; color:var(--text-muted);">
+                    <div>点击上方“扫描重复文件”获取音频去重分析报告...</div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -170,6 +323,16 @@
         if (adminToken) {
             document.getElementById("login-modal").style.display = "none";
             loadAdminStatus();
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            document.querySelectorAll('.view-panel').forEach(panel => panel.classList.remove('active'));
+
+            const navItem = document.getElementById(`nav-${tabId}`);
+            const viewPanel = document.getElementById(`view-${tabId}`);
+            if (navItem) navItem.classList.add('active');
+            if (viewPanel) viewPanel.classList.add('active');
         }
 
         async function doLogin() {
@@ -228,8 +391,8 @@
                     return;
                 }
                 const data = await res.json();
-                document.getElementById("db-status").innerText = data.has_global_db ? "🟢 4500万预置数据库: 已就绪 (使能加速比对)" : "⚪ 纯本地轻量模式: 运行中";
-                document.getElementById("cpu-status").innerText = `CPU 核心: ${data.cpu.total_cpus} 核 | 硬件并发: ${data.cpu.max_workers} 线程`;
+                document.getElementById("db-status").innerText = data.has_global_db ? "🟢 4500万预置数据库: 已就绪" : "⚪ 纯本地轻量模式: 运行中";
+                document.getElementById("cpu-status").innerText = `⚙️ CPU: ${data.cpu.total_cpus}核 | 并发: ${data.cpu.max_workers}线程`;
 
                 // Update Scan task
                 updateTaskUI("scan", data.scan || { status: data.status, logs: data.logs }, "scan-progress-bar", "scan-percent-badge", "scan-log-box");
@@ -250,15 +413,15 @@
                     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
                 }
             } catch (err) {
-                console.error(err);
+                console.error("Failed loading admin status:", err);
             }
         }
 
-        // 1. Scan Task Actions
+        // 1. Scan Actions
         async function startScan() {
             const res = await fetch("/api/scan/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
             const data = await res.json();
-            alert(data.message || "扫描任务已启动！");
+            alert(data.message || "增量扫描已启动！");
             loadAdminStatus();
         }
 
@@ -267,11 +430,11 @@
             loadAdminStatus();
         }
 
-        // 2. Batch Scrape Actions
+        // 2. Scrape Actions
         async function startBatchScrape() {
             const res = await fetch("/api/scrape/batch/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
             const data = await res.json();
-            alert(data.message || "批量刮削任务已启动！");
+            alert(data.message || "全库批量刮削已启动！");
             loadAdminStatus();
         }
 
@@ -328,24 +491,24 @@
 
                 let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <span style="color: var(--accent-red); font-weight:600;">检测到 ${data.length} 组重复音频</span>
-                    <button class="btn" style="background: var(--accent-red); font-size:12px; padding:4px 10px;" onclick="resolveAllDuplicates()">🧹 一键全自动清理重复项</button>
+                    <button class="btn" style="background: var(--accent-red); font-size:12px; padding:6px 12px;" onclick="resolveAllDuplicates()">🧹 一键全自动清理重复项</button>
                 </div>`;
 
                 data.forEach((cluster, idx) => {
-                    html += `<div style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 8px; padding: 10px; margin-bottom: 10px;">
-                        <div style="font-size:12px; font-weight:600; color: var(--primary); margin-bottom:6px;">组 ${idx+1}: ${cluster.match_type}</div>`;
+                    html += `<div style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 10px; padding: 12px; margin-bottom: 10px;">
+                        <div style="font-size:13px; font-weight:600; color: var(--primary); margin-bottom:8px;">组 ${idx+1}: ${cluster.match_type}</div>`;
                     cluster.tracks.forEach(t => {
                         const isKeep = t.recommend_action === "KEEP";
                         const badgeColor = isKeep ? "var(--accent-green)" : "var(--accent-red)";
                         const badgeText = isKeep ? "🟢 推荐保留 (高画质)" : "🔴 建议清理 (重复版)";
                         const mb = (t.file_size / 1048576).toFixed(1);
-                        html += `<div style="display:flex; justify-content:space-between; align-items:center; background: ${isKeep ? 'rgba(0,255,136,0.05)' : 'rgba(255,71,87,0.05)'}; padding: 6px 8px; border-radius: 6px; margin-top: 4px; font-size: 12px;">
-                            <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 70%;">
+                        html += `<div style="display:flex; justify-content:space-between; align-items:center; background: ${isKeep ? 'rgba(0,255,136,0.05)' : 'rgba(255,71,87,0.05)'}; padding: 8px 10px; border-radius: 8px; margin-top: 6px; font-size: 13px;">
+                            <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 75%;">
                                 <span style="color:${badgeColor}; font-weight:600;">${badgeText}</span>
-                                <span style="margin-left:6px; color:var(--text-main);">${t.track_name || '未知歌名'} - ${t.artist_name || '未知歌手'}</span>
-                                <span style="color:var(--text-muted); margin-left:4px;">(${t.format}, ${mb}MB)</span>
+                                <span style="margin-left:8px; color:var(--text-main);">${t.track_name || '未知歌名'} - ${t.artist_name || '未知歌手'}</span>
+                                <span style="color:var(--text-muted); margin-left:6px;">(${t.format}, ${mb}MB)</span>
                             </div>
-                            ${!isKeep ? `<button class="btn" style="background: var(--accent-red); font-size:11px; padding:2px 8px;" onclick="resolveSingleDuplicate('${encodeURIComponent(t.local_path)}')">移至回收站</button>` : `<span style="color:var(--accent-green); font-size:11px;">[保留首选]</span>`}
+                            ${!isKeep ? `<button class="btn" style="background: var(--accent-red); font-size:11px; padding:4px 10px;" onclick="resolveSingleDuplicate('${encodeURIComponent(t.local_path)}')">移至回收站</button>` : `<span style="color:var(--accent-green); font-size:12px; font-weight:600;">[保留首选]</span>`}
                         </div>`;
                     });
                     html += `</div>`;
