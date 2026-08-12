@@ -86,7 +86,7 @@ def find_duplicates() -> List[Dict[str, Any]]:
             for t in group:
                 processed_paths.add(t["local_path"])
 
-    # Group 3: Generic Title Fallback (Matching '外婆的澎湖湾.flac' vs '外婆的澎湖湾.mp3' even if one has unknown artist)
+    # Group 3: Generic Title Fallback (Only matches if artist is unknown or artists overlap; respects distinct cover versions)
     generic_title_groups: Dict[str, List[Dict[str, Any]]] = {}
     for track in tracks:
         if track["local_path"] in processed_paths:
@@ -99,6 +99,19 @@ def find_duplicates() -> List[Dict[str, Any]]:
 
     for clean_title, group in generic_title_groups.items():
         if len(group) > 1:
+            known_artists = set()
+            has_unknown = False
+            for t in group:
+                art = (t.get("artist_name") or "").strip().lower()
+                if not art or art in ["unknown artist", "unknown"]:
+                    has_unknown = True
+                else:
+                    known_artists.add(art)
+
+            # Distinct known cover versions (e.g. 潘安邦 vs 张明敏) should NOT be flagged as duplicates to delete
+            if not has_unknown and len(known_artists) > 1:
+                continue
+
             cluster = _build_duplicate_cluster(group, match_type="Fuzzy Title Duplicate (歌名一致跨格式重复)")
             duplicate_clusters.append(cluster)
 
