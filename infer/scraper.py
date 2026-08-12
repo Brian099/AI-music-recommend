@@ -112,11 +112,58 @@ def _candidate_complete(item: dict, wants: List[str]) -> bool:
     return True
 
 
-def _search_first_complete(keyword: str, sources: List[str], wants: List[str], page_size: int = 5, timeout: int = 8) -> Tuple[Optional[dict], List[dict]]:
+def contains_cjk(text: str) -> bool:
+    """Checks if string contains CJK / Chinese characters."""
+    return bool(re.search(r"[\u4e00-\u9fff]", text or ""))
+
+
+def score_candidate(item: dict, query_keyword: str, query_artist: str = "") -> float:
     """
-    Searches platform by platform:
-    If a candidate has all required fields (complete), returns immediately without querying remaining sources.
-    Returns (candidate, all_flat_candidates).
+    Ranks candidates based on CJK language alignment, title matching, and artist similarity.
+    Prevents picking English translated titles (e.g. Burning/Anesthesia) when query is Chinese.
+    """
+    score = 0.0
+    cand_title = (item.get("title") or "").strip()
+    cand_artist = (item.get("artist") or "").strip()
+
+    q_has_cjk = contains_cjk(query_keyword)
+    c_has_cjk = contains_cjk(cand_title)
+
+    # 1. CJK Language Alignment Bonus
+    if q_has_cjk and c_has_cjk:
+        score += 80.0
+    elif q_has_cjk and not c_has_cjk:
+        score -= 50.0  # Penalize non-Chinese primary titles for Chinese queries
+
+    # 2. Title Match Bonus
+    clean_q = re.sub(r"^\d+[\.\s\-_]+", "", query_keyword).strip().lower()
+    clean_c = re.sub(r"^\d+[\.\s\-_]+", "", cand_title).strip().lower()
+
+    if clean_c == clean_q:
+        score += 100.0
+    elif clean_q in clean_c or clean_c in clean_q:
+        score += 40.0
+
+    # 3. Artist Match Bonus
+    if query_artist and query_artist.lower() not in ["unknown artist", "unknown", ""]:
+        q_art = query_artist.lower()
+        c_art = cand_artist.lower()
+        if q_art in c_art or c_art in q_art:
+            score += 80.0
+
+    # 4. Cover & Date Completeness Bonus
+    if item.get("picUrl"):
+        score += 10.0
+    if item.get("date"):
+        score += 10.0
+
+    return score
+
+
+def _search_first_complete(keyword: str, sources: List[str], wants: List[str], page_size: int = 10, timeout: int = 8, artist: str = "") -> Tuple[Optional[dict], List[dict]]:
+    """
+    Searches across platforms, scores candidates by relevance & CJK alignment,
+    and returns the best complete candidate.
     """
     all_flat = []
     for platform in sources:
@@ -128,12 +175,18 @@ def _search_first_complete(keyword: str, sources: List[str], wants: List[str], p
             for item in g.get("items") or []:
                 item = dict(item)
                 item["_platform"] = g["pluginId"]
+                item["_score"] = score_candidate(item, keyword, artist)
                 items.append(item)
         all_flat.extend(items)
-        for item in items:
-            if _candidate_complete(item, wants):
-                return item, all_flat
-    return None, all_flat
+
+    # Sort candidates by relevance score
+    all_flat.sort(key=lambda x: x.get("_score", 0), reverse=True)
+
+    for item in all_flat:
+        if _candidate_complete(item, wants):
+            return item, all_flat
+
+    return (all_flat[0] if all_flat else None), all_flat
 
 
 def _complement_candidate(flat: List[dict], wants: List[str]) -> Optional[dict]:
@@ -204,7 +257,7 @@ def sync_fetch_online_metadata(title: str, artist: str, file_path: str = "") -> 
     wants = ["title", "artist", "album", "cover", "year"]
 
     try:
-        candidate, flat = _search_first_complete(keyword, sources, wants)
+        candidate, flat = _search_first_complete(keyword, sources, wants, artist=artist)
         if candidate is None:
             candidate = _complement_candidate(flat, wants)
 
