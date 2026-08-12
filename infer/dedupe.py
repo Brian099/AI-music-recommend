@@ -29,9 +29,12 @@ def calculate_file_md5(file_path: str, chunk_size: int = 1048576) -> Optional[st
         return None
 
 
+import re
+
+
 def find_duplicates() -> List[Dict[str, Any]]:
     """
-    Scans library_db for duplicate groups across MD5, metadata, and acoustic similarity.
+    Scans library_db for duplicate groups across MD5, metadata, and fuzzy title matching.
     Returns a structured list of duplicate clusters with Smart Keep recommendations.
     """
     tracks = library_db.get_all_tracks(limit=50000, offset=0)
@@ -55,20 +58,48 @@ def find_duplicates() -> List[Dict[str, Any]]:
             for t in group:
                 processed_paths.add(t["local_path"])
 
-    # Group 2: Title + Artist + Duration Metadata Duplicates
-    meta_groups: Dict[str, List[Dict[str, Any]]] = {}
+    # Group 2: Fuzzy Title & Artist Matching (Handles Unknown Artist & Title Only Matches)
+    title_groups: Dict[str, List[Dict[str, Any]]] = {}
     for track in tracks:
         if track["local_path"] in processed_paths:
             continue
-        title = (track.get("track_name") or "").strip().lower()
-        artist = (track.get("artist_name") or "").strip().lower()
-        duration_bin = int(track.get("duration", 0.0) // 3)  # 3-second duration binning
-        key = f"{artist} | {title} | {duration_bin}"
-        meta_groups.setdefault(key, []).append(track)
 
-    for key, group in meta_groups.items():
+        raw_name = track.get("track_name") or os.path.splitext(os.path.basename(track["local_path"]))[0]
+        # Clean leading track numbers like 01. or [02]-
+        clean_title = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", raw_name).strip().lower()
+        # Clean version suffixes in brackets e.g. (现场版), （古典版）
+        clean_title = re.sub(r"[\(\（\（].*?[\)\）\）]", "", clean_title).strip()
+
+        artist = (track.get("artist_name") or "").strip().lower()
+        if artist in ["unknown artist", "unknown", ""]:
+            key = f"title::{clean_title}"
+        else:
+            key = f"{artist}::{clean_title}"
+
+        title_groups.setdefault(key, []).append(track)
+
+    # Group 2a: Strict Artist + Clean Title Matches
+    for key, group in list(title_groups.items()):
         if len(group) > 1:
-            cluster = _build_duplicate_cluster(group, match_type="Metadata Match Duplicate (元数据/时长一致重复)")
+            cluster = _build_duplicate_cluster(group, match_type="Metadata Match Duplicate (同歌手同歌名重复)")
+            duplicate_clusters.append(cluster)
+            for t in group:
+                processed_paths.add(t["local_path"])
+
+    # Group 3: Generic Title Fallback (Matching '外婆的澎湖湾.flac' vs '外婆的澎湖湾.mp3' even if one has unknown artist)
+    generic_title_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for track in tracks:
+        if track["local_path"] in processed_paths:
+            continue
+        raw_name = track.get("track_name") or os.path.splitext(os.path.basename(track["local_path"]))[0]
+        clean_title = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", raw_name).strip().lower()
+        clean_title = re.sub(r"[\(\（\（].*?[\)\）\）]", "", clean_title).strip()
+        if len(clean_title) >= 2:  # Avoid single character collision
+            generic_title_groups.setdefault(clean_title, []).append(track)
+
+    for clean_title, group in generic_title_groups.items():
+        if len(group) > 1:
+            cluster = _build_duplicate_cluster(group, match_type="Fuzzy Title Duplicate (歌名一致跨格式重复)")
             duplicate_clusters.append(cluster)
 
     return duplicate_clusters
