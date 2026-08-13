@@ -633,7 +633,7 @@ async def _run_batch_scrape(workers: int):
     scrape_task_mgr.cancel_requested = False
     scrape_task_mgr.status["is_running"] = True
     scrape_task_mgr.status["phase"] = "scraping"
-    scrape_task_mgr.add_log("-> 启动全库曲目批量元数据与歌词在线刮削...")
+    scrape_task_mgr.add_log(f"-> 启动全库曲目批量元数据与歌词在线刮削 (并发任务: {workers})...")
 
     tracks = library_db.get_all_tracks(limit=50000, offset=0)
     if not tracks:
@@ -646,32 +646,41 @@ async def _run_batch_scrape(workers: int):
 
     scrape_task_mgr.status["total"] = len(tracks)
     processed = 0
+    sem = asyncio.Semaphore(max(1, workers))
 
-    for track in tracks:
+    async def _scrape_single(track):
+        nonlocal processed
         if scrape_task_mgr.cancel_requested:
-            scrape_task_mgr.add_log("🛑 批量刮削任务已手动中止。")
-            break
+            return
 
         path = track.get("local_path")
         if not path or not os.path.exists(path):
             processed += 1
-            continue
+            scrape_task_mgr.status["current"] = processed
+            scrape_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+            return
 
-        info = parse_audio_file_info(path)
-        title = info.get("title") or track.get("track_name") or os.path.basename(path)
-        artist = info.get("artist") if info.get("artist") != "Unknown Artist" else (track.get("artist_name") or "Unknown Artist")
+        async with sem:
+            if scrape_task_mgr.cancel_requested:
+                return
+            info = parse_audio_file_info(path)
+            title = info.get("title") or track.get("track_name") or os.path.basename(path)
+            artist = info.get("artist") if info.get("artist") != "Unknown Artist" else (track.get("artist_name") or "Unknown Artist")
 
-        try:
-            meta = await fetch_online_metadata(title, artist, file_path=path)
-            lrc = await fetch_lyrics_lddc(title, artist, file_path=path)
-            await apply_scrape_to_file(path, meta, lrc)
-            scrape_task_mgr.add_log(f"✓ 已完成刮削与标签嵌入: {os.path.basename(path)} [{meta.get('title', title)} - {meta.get('artist', artist)}]")
-        except Exception as e:
-            scrape_task_mgr.add_log(f"⚠️ 刮削出错 {os.path.basename(path)}: {e}")
+            try:
+                meta = await fetch_online_metadata(title, artist, file_path=path)
+                lrc = await fetch_lyrics_lddc(title, artist, file_path=path)
+                await apply_scrape_to_file(path, meta, lrc)
+                scrape_task_mgr.add_log(f"✓ 已完成刮削与标签嵌入: {os.path.basename(path)} [{meta.get('title', title)} - {meta.get('artist', artist)}]")
+            except Exception as e:
+                scrape_task_mgr.add_log(f"⚠️ 刮削出错 {os.path.basename(path)}: {e}")
 
-        processed += 1
-        scrape_task_mgr.status["current"] = processed
-        scrape_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+            processed += 1
+            scrape_task_mgr.status["current"] = processed
+            scrape_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+
+    tasks = [_scrape_single(t) for t in tracks]
+    await asyncio.gather(*tasks)
 
     scrape_task_mgr.is_running = False
     scrape_task_mgr.status["is_running"] = False
@@ -707,7 +716,7 @@ async def _run_batch_vector_extraction(workers: int):
     vector_task_mgr.cancel_requested = False
     vector_task_mgr.status["is_running"] = True
     vector_task_mgr.status["phase"] = "extracting"
-    vector_task_mgr.add_log("-> 启动全库 AI 声学向量提取与 Qdrant 索引建库任务...")
+    vector_task_mgr.add_log(f"-> 启动全库 AI 声学向量提取与 Qdrant 索引建库任务 (多核并发线程: {workers})...")
 
     tracks = library_db.get_all_tracks(limit=50000, offset=0)
     if not tracks:
@@ -726,6 +735,7 @@ async def _run_batch_vector_extraction(workers: int):
         from infer.model_infer import load_model, build_features
         from qdrant_client import QdrantClient
         from qdrant_client.http import models as qdrant_models
+        from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
         import torch
 
         checkpoint_path = os.path.join(project_root, "checkpoints", "EmbeatMLP", "model.pt")
@@ -759,63 +769,87 @@ async def _run_batch_vector_extraction(workers: int):
                 )
             )
 
-        for track in tracks:
+        sem = asyncio.Semaphore(max(1, workers))
+        loop = asyncio.get_running_loop()
+
+        # Initialize ProcessPoolExecutor, fallback to ThreadPoolExecutor if forbidden in Docker
+        executor = None
+        try:
+            executor = ProcessPoolExecutor(max_workers=workers)
+            vector_task_mgr.add_log(f"-> 已成功初始化 ProcessPoolExecutor 多进程计算池 ({workers} Workers)")
+        except Exception as pe:
+            executor = ThreadPoolExecutor(max_workers=workers)
+            vector_task_mgr.add_log(f"⚠️ 多进程池创建回退至线程池: {pe}")
+
+        async def _extract_single(track):
+            nonlocal processed
             if vector_task_mgr.cancel_requested:
-                vector_task_mgr.add_log("🛑 声学向量提取任务已手动中止。")
-                break
+                return
 
             path = track.get("local_path")
             if not path or not os.path.exists(path):
                 processed += 1
-                continue
+                vector_task_mgr.status["current"] = processed
+                vector_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+                return
 
-            try:
-                features = await asyncio.to_thread(extract_audio_features, path)
-                if features:
-                    artist_genres = features.pop("artist_genres", "pop")
-                    artist_genre_idx = features.pop("artist_genre_idx", 1)
+            async with sem:
+                if vector_task_mgr.cancel_requested:
+                    return
+                try:
+                    features = await loop.run_in_executor(executor, extract_audio_features, path)
+                    if features:
+                        artist_genres = features.pop("artist_genres", "pop")
+                        artist_genre_idx = features.pop("artist_genre_idx", 1)
 
-                    row = {
-                        "track_id": track.get("track_id") or str(uuid.uuid5(uuid.NAMESPACE_DNS, path)),
-                        "track_name": track.get("track_name") or os.path.basename(path),
-                        "artist_name": track.get("artist_name") or "Unknown Artist",
-                        "artist_idx": abs(hash(track.get("artist_name", ""))) % 1000 + 1,
-                        "artist_genres": artist_genres,
-                        "artist_genre_idx": artist_genre_idx,
-                        "related_artist_idxs": [],
-                        "album_name": track.get("album_name") or "Local Audio",
-                        "isrc": f"LOCAL_{abs(hash(path)) % 1000000}",
-                        "popularity": 0.5,
-                        "local_path": path,
-                        **features
-                    }
+                        row = {
+                            "track_id": track.get("track_id") or str(uuid.uuid5(uuid.NAMESPACE_DNS, path)),
+                            "track_name": track.get("track_name") or os.path.basename(path),
+                            "artist_name": track.get("artist_name") or "Unknown Artist",
+                            "artist_idx": abs(hash(track.get("artist_name", ""))) % 1000 + 1,
+                            "artist_genres": artist_genres,
+                            "artist_genre_idx": artist_genre_idx,
+                            "related_artist_idxs": [],
+                            "album_name": track.get("album_name") or "Local Audio",
+                            "isrc": f"LOCAL_{abs(hash(path)) % 1000000}",
+                            "popularity": 0.5,
+                            "local_path": path,
+                            **features
+                        }
 
-                    if model:
-                        computed_feat = build_features(samples=[row], torch_device=torch.device("cpu"))
-                        with torch.no_grad():
-                            emb = model(computed_feat).cpu().numpy()[0]
-                    else:
-                        emb = np.random.randn(64).astype(np.float32)
+                        if model:
+                            computed_feat = build_features(samples=[row], torch_device=torch.device("cpu"))
+                            with torch.no_grad():
+                                emb = model(computed_feat).cpu().numpy()[0]
+                        else:
+                            emb = np.random.randn(64).astype(np.float32)
 
-                    point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, row["track_id"]))
-                    payload = {k: row[k] for k in (
-                        "track_id", "track_name", "popularity", "artist_name",
-                        "artist_idx", "artist_genres", "artist_genre_idx",
-                        "related_artist_idxs", "album_name", "isrc", "local_path"
-                    ) if k in row}
-                    q_client.upsert(
-                        collection_name=collection_name,
-                        points=[qdrant_models.PointStruct(id=point_id, vector=emb.tolist(), payload=payload)]
-                    )
+                        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, row["track_id"]))
+                        payload = {k: row[k] for k in (
+                            "track_id", "track_name", "popularity", "artist_name",
+                            "artist_idx", "artist_genres", "artist_genre_idx",
+                            "related_artist_idxs", "album_name", "isrc", "local_path"
+                        ) if k in row}
+                        q_client.upsert(
+                            collection_name=collection_name,
+                            points=[qdrant_models.PointStruct(id=point_id, vector=emb.tolist(), payload=payload)]
+                        )
 
-                    vector_task_mgr.add_log(f"✓ 向量特征提取成功: {os.path.basename(path)} [BPM: {features.get('tempo', 0):.1f}, Genre: {artist_genres}]")
+                        vector_task_mgr.add_log(f"✓ 向量特征提取成功: {os.path.basename(path)} [BPM: {features.get('tempo', 0):.1f}, Genre: {artist_genres}]")
 
-            except Exception as e:
-                vector_task_mgr.add_log(f"⚠️ 声学特征提取出错 {os.path.basename(path)}: {e}")
+                except Exception as e:
+                    vector_task_mgr.add_log(f"⚠️ 声学特征提取出错 {os.path.basename(path)}: {e}")
 
-            processed += 1
-            vector_task_mgr.status["current"] = processed
-            vector_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+                processed += 1
+                vector_task_mgr.status["current"] = processed
+                vector_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+
+        try:
+            tasks = [_extract_single(t) for t in tracks]
+            await asyncio.gather(*tasks)
+        finally:
+            if executor:
+                executor.shutdown(wait=False)
 
     except Exception as e:
         vector_task_mgr.add_log(f"❌ 向量提取任务化异常: {e}")
