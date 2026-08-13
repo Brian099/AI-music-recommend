@@ -219,7 +219,7 @@
                 </p>
                 <div style="display:flex; gap:12px; margin-bottom: 12px;">
                     <button id="btn-start-scan" class="btn" onclick="startScan()">启动增量断点扫描</button>
-                    <button class="btn" style="background: var(--accent-red);" onclick="stopScan()">中止扫描</button>
+                    <button id="btn-stop-scan" class="btn" style="background: var(--accent-red); display: none;" onclick="stopScan()">中止扫描</button>
                 </div>
                 <div class="progress-container">
                     <div id="scan-progress-bar" class="progress-bar"></div>
@@ -242,7 +242,7 @@
                 </p>
                 <div style="display:flex; gap:12px; margin-bottom: 16px;">
                     <button id="btn-start-scrape" class="btn" style="background: #a044ff;" onclick="startBatchScrape()">启动全库批量刮削</button>
-                    <button class="btn" style="background: var(--accent-red);" onclick="stopBatchScrape()">中止刮削</button>
+                    <button id="btn-stop-scrape" class="btn" style="background: var(--accent-red); display: none;" onclick="stopBatchScrape()">中止刮削</button>
                 </div>
                 
                 <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); padding: 14px; border-radius: 12px; margin-bottom: 14px;">
@@ -274,7 +274,7 @@
                 </p>
                 <div style="display:flex; gap:12px; margin-bottom: 16px;">
                     <button id="btn-start-vector" class="btn" style="background: var(--accent-green); color:#000;" onclick="startVectorExtract()">启动 AI 声学向量提取</button>
-                    <button class="btn" style="background: var(--accent-red);" onclick="stopVectorExtract()">中止提取</button>
+                    <button id="btn-stop-vector" class="btn" style="background: var(--accent-red); display: none;" onclick="stopVectorExtract()">中止提取</button>
                 </div>
                 <div class="progress-container">
                     <div id="vector-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #00ff88, #00d2ff);"></div>
@@ -355,7 +355,7 @@
 
         let pollTimer = null;
 
-        function updateTaskUI(taskKey, taskData, barId, badgeId, logBoxId, btnId, runningText, idleText) {
+        function updateTaskUI(taskKey, taskData, barId, badgeId, logBoxId, btnId, stopBtnId, runningText, idleText) {
             if (!taskData) return;
             const status = taskData.status || {};
             const logs = taskData.logs || [];
@@ -364,6 +364,7 @@
             const badge = document.getElementById(badgeId);
             const logBox = document.getElementById(logBoxId);
             const btn = document.getElementById(btnId);
+            const stopBtn = document.getElementById(stopBtnId);
 
             if (logs.length > 0) {
                 logBox.innerHTML = logs.map(l => `<div style="padding: 2px 0;">${l}</div>`).join("");
@@ -381,6 +382,9 @@
                     btn.style.cursor = "not-allowed";
                     btn.innerText = runningText;
                 }
+                if (stopBtn) {
+                    stopBtn.style.display = "inline-block";
+                }
             } else {
                 bar.style.width = status.phase === 'done' ? "100%" : "0%";
                 badge.innerText = status.phase === 'done' ? "已完成 100%" : "就绪";
@@ -390,6 +394,9 @@
                     btn.style.opacity = "1";
                     btn.style.cursor = "pointer";
                     btn.innerText = idleText;
+                }
+                if (stopBtn) {
+                    stopBtn.style.display = "none";
                 }
             }
         }
@@ -408,13 +415,13 @@
                 document.getElementById("cpu-status").innerText = `⚙️ CPU: ${data.cpu.total_cpus}核 | 并发: ${data.cpu.max_workers}线程`;
 
                 // Update Scan task
-                updateTaskUI("scan", data.scan || { status: data.status, logs: data.logs }, "scan-progress-bar", "scan-percent-badge", "scan-log-box", "btn-start-scan", "增量扫描中...", "启动增量断点扫描");
+                updateTaskUI("scan", data.scan || { status: data.status, logs: data.logs }, "scan-progress-bar", "scan-percent-badge", "scan-log-box", "btn-start-scan", "btn-stop-scan", "增量扫描中...", "启动增量断点扫描");
 
                 // Update Scrape task
-                updateTaskUI("scrape", data.scrape, "scrape-progress-bar", "scrape-percent-badge", "scrape-log-box", "btn-start-scrape", "全库刮削中...", "启动全库批量刮削");
+                updateTaskUI("scrape", data.scrape, "scrape-progress-bar", "scrape-percent-badge", "scrape-log-box", "btn-start-scrape", "btn-stop-scrape", "全库刮削中...", "启动全库批量刮削");
 
                 // Update Vector task
-                updateTaskUI("vector", data.vector, "vector-progress-bar", "vector-percent-badge", "vector-log-box", "btn-start-vector", "向量信息提取中...", "启动 AI 声学向量提取");
+                updateTaskUI("vector", data.vector, "vector-progress-bar", "vector-percent-badge", "vector-log-box", "btn-start-vector", "btn-stop-vector", "向量信息提取中...", "启动 AI 声学向量提取");
 
                 const isAnyRunning = (data.scan && data.scan.status.is_running) ||
                                      (data.scrape && data.scrape.status.is_running) ||
