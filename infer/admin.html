@@ -218,7 +218,7 @@
                     递归扫描音乐根目录下的所有音频文件，生成哈希与结构索引并建立 SQLite 本地库档案。支持毫秒级增量断点跳过。
                 </p>
                 <div style="display:flex; gap:12px; margin-bottom: 12px;">
-                    <button class="btn" onclick="startScan()">启动增量断点扫描</button>
+                    <button id="btn-start-scan" class="btn" onclick="startScan()">启动增量断点扫描</button>
                     <button class="btn" style="background: var(--accent-red);" onclick="stopScan()">中止扫描</button>
                 </div>
                 <div class="progress-container">
@@ -241,7 +241,7 @@
                     整合网易云音乐、QQ音乐、酷狗、汽水及 Apple Music，跨平台补全高精专辑大图与 LRC 歌词，智能回写入 ID3/FLAC 标签。
                 </p>
                 <div style="display:flex; gap:12px; margin-bottom: 16px;">
-                    <button class="btn" style="background: #a044ff;" onclick="startBatchScrape()">启动全库批量刮削</button>
+                    <button id="btn-start-scrape" class="btn" style="background: #a044ff;" onclick="startBatchScrape()">启动全库批量刮削</button>
                     <button class="btn" style="background: var(--accent-red);" onclick="stopBatchScrape()">中止刮削</button>
                 </div>
                 
@@ -273,7 +273,7 @@
                     基于 EmbeatMLP 神经网络模型提取 128 维声学 Embedding 向量，同步批量写入 Qdrant 向量数据库，驱动 AI 漫游电台。
                 </p>
                 <div style="display:flex; gap:12px; margin-bottom: 16px;">
-                    <button class="btn" style="background: var(--accent-green); color:#000;" onclick="startVectorExtract()">启动 AI 声学向量提取</button>
+                    <button id="btn-start-vector" class="btn" style="background: var(--accent-green); color:#000;" onclick="startVectorExtract()">启动 AI 声学向量提取</button>
                     <button class="btn" style="background: var(--accent-red);" onclick="stopVectorExtract()">中止提取</button>
                 </div>
                 <div class="progress-container">
@@ -355,7 +355,7 @@
 
         let pollTimer = null;
 
-        function updateTaskUI(taskKey, taskData, barId, badgeId, logBoxId) {
+        function updateTaskUI(taskKey, taskData, barId, badgeId, logBoxId, btnId, runningText, idleText) {
             if (!taskData) return;
             const status = taskData.status || {};
             const logs = taskData.logs || [];
@@ -363,6 +363,7 @@
             const bar = document.getElementById(barId);
             const badge = document.getElementById(badgeId);
             const logBox = document.getElementById(logBoxId);
+            const btn = document.getElementById(btnId);
 
             if (logs.length > 0) {
                 logBox.innerHTML = logs.map(l => `<div style="padding: 2px 0;">${l}</div>`).join("");
@@ -374,10 +375,22 @@
                 bar.style.width = pct + "%";
                 badge.innerText = `运行中 ${pct}%`;
                 badge.style.background = "var(--primary)";
+                if (btn) {
+                    btn.disabled = true;
+                    btn.style.opacity = "0.55";
+                    btn.style.cursor = "not-allowed";
+                    btn.innerText = runningText;
+                }
             } else {
                 bar.style.width = status.phase === 'done' ? "100%" : "0%";
                 badge.innerText = status.phase === 'done' ? "已完成 100%" : "就绪";
                 badge.style.background = status.phase === 'done' ? "var(--accent-green)" : "rgba(255,255,255,0.1)";
+                if (btn) {
+                    btn.disabled = false;
+                    btn.style.opacity = "1";
+                    btn.style.cursor = "pointer";
+                    btn.innerText = idleText;
+                }
             }
         }
 
@@ -395,13 +408,13 @@
                 document.getElementById("cpu-status").innerText = `⚙️ CPU: ${data.cpu.total_cpus}核 | 并发: ${data.cpu.max_workers}线程`;
 
                 // Update Scan task
-                updateTaskUI("scan", data.scan || { status: data.status, logs: data.logs }, "scan-progress-bar", "scan-percent-badge", "scan-log-box");
+                updateTaskUI("scan", data.scan || { status: data.status, logs: data.logs }, "scan-progress-bar", "scan-percent-badge", "scan-log-box", "btn-start-scan", "增量扫描中...", "启动增量断点扫描");
 
                 // Update Scrape task
-                updateTaskUI("scrape", data.scrape, "scrape-progress-bar", "scrape-percent-badge", "scrape-log-box");
+                updateTaskUI("scrape", data.scrape, "scrape-progress-bar", "scrape-percent-badge", "scrape-log-box", "btn-start-scrape", "全库刮削中...", "启动全库批量刮削");
 
                 // Update Vector task
-                updateTaskUI("vector", data.vector, "vector-progress-bar", "vector-percent-badge", "vector-log-box");
+                updateTaskUI("vector", data.vector, "vector-progress-bar", "vector-percent-badge", "vector-log-box", "btn-start-vector", "向量信息提取中...", "启动 AI 声学向量提取");
 
                 const isAnyRunning = (data.scan && data.scan.status.is_running) ||
                                      (data.scrape && data.scrape.status.is_running) ||
