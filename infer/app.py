@@ -644,7 +644,26 @@ async def _run_batch_scrape(workers: int):
         scrape_task_mgr.add_log("✓ 数据库中暂无待刮削的曲目。")
         return
 
-    scrape_task_mgr.status["total"] = len(tracks)
+    to_process = []
+    skipped_count = 0
+    for t in tracks:
+        if t.get("scraped_at"):
+            skipped_count += 1
+        else:
+            to_process.append(t)
+
+    if skipped_count > 0:
+        scrape_task_mgr.add_log(f"-> 发现曲目 {len(tracks)} 首，断点秒级跳过已完成刮削曲目 {skipped_count} 首，剩余待处理 {len(to_process)} 首。")
+
+    if not to_process:
+        scrape_task_mgr.is_running = False
+        scrape_task_mgr.status["is_running"] = False
+        scrape_task_mgr.status["phase"] = "done"
+        scrape_task_mgr.status["percent"] = 100
+        scrape_task_mgr.add_log(f"✓ 所有 {len(tracks)} 首曲目均已完成在线刮削（断点秒级跳过），无需重复刮削！")
+        return
+
+    scrape_task_mgr.status["total"] = len(to_process)
     processed = 0
     sem = asyncio.Semaphore(max(1, workers))
 
@@ -657,7 +676,7 @@ async def _run_batch_scrape(workers: int):
         if not path or not os.path.exists(path):
             processed += 1
             scrape_task_mgr.status["current"] = processed
-            scrape_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+            scrape_task_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
             return
 
         async with sem:
@@ -677,16 +696,16 @@ async def _run_batch_scrape(workers: int):
 
             processed += 1
             scrape_task_mgr.status["current"] = processed
-            scrape_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+            scrape_task_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
 
-    tasks = [_scrape_single(t) for t in tracks]
+    tasks = [_scrape_single(t) for t in to_process]
     await asyncio.gather(*tasks)
 
     scrape_task_mgr.is_running = False
     scrape_task_mgr.status["is_running"] = False
     scrape_task_mgr.status["phase"] = "done"
     scrape_task_mgr.status["percent"] = 100
-    scrape_task_mgr.add_log(f"✓ 批量刮削任务处理完毕！已处理 {processed}/{len(tracks)} 首曲目。")
+    scrape_task_mgr.add_log(f"✓ 批量刮削任务处理完毕！已处理 {processed}/{len(to_process)} 首曲目。")
 
 
 # ── Acoustic Vector Extraction & Qdrant Dedicated APIs & Task Manager ────────
@@ -727,7 +746,6 @@ async def _run_batch_vector_extraction(workers: int):
         vector_task_mgr.add_log("✓ 数据库中暂无音频文件。")
         return
 
-    vector_task_mgr.status["total"] = len(tracks)
     processed = 0
 
     try:
@@ -769,6 +787,41 @@ async def _run_batch_vector_extraction(workers: int):
                 )
             )
 
+        # Check existing Qdrant vector points for O(1) breakpoint skipping
+        existing_point_ids = set()
+        candidate_map = {}
+        for track in tracks:
+            path = track.get("local_path", "")
+            t_id = track.get("track_id") or str(uuid.uuid5(uuid.NAMESPACE_DNS, path))
+            p_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, t_id))
+            candidate_map[p_id] = track
+
+        all_p_ids = list(candidate_map.keys())
+        for i in range(0, len(all_p_ids), 500):
+            batch_ids = all_p_ids[i:i+500]
+            try:
+                retrieved = q_client.retrieve(collection_name=collection_name, ids=batch_ids, with_payload=False, with_vectors=False)
+                for r in retrieved:
+                    existing_point_ids.add(str(r.id))
+            except Exception:
+                pass
+
+        to_process = [t for p_id, t in candidate_map.items() if p_id not in existing_point_ids]
+        skipped_count = len(tracks) - len(to_process)
+
+        if skipped_count > 0:
+            vector_task_mgr.add_log(f"-> 发现曲目 {len(tracks)} 首，断点秒级跳过已提取向量曲目 {skipped_count} 首，剩余待处理 {len(to_process)} 首。")
+
+        if not to_process:
+            vector_task_mgr.is_running = False
+            vector_task_mgr.status["is_running"] = False
+            vector_task_mgr.status["phase"] = "done"
+            vector_task_mgr.status["percent"] = 100
+            vector_task_mgr.add_log(f"✓ 所有 {len(tracks)} 首曲目均已完成 AI 声学向量提取与 Qdrant 索引建库（断点秒级跳过），无需重复提取！")
+            return
+
+        vector_task_mgr.status["total"] = len(to_process)
+
         sem = asyncio.Semaphore(max(1, workers))
         loop = asyncio.get_running_loop()
 
@@ -790,7 +843,7 @@ async def _run_batch_vector_extraction(workers: int):
             if not path or not os.path.exists(path):
                 processed += 1
                 vector_task_mgr.status["current"] = processed
-                vector_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+                vector_task_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
                 return
 
             async with sem:
@@ -842,10 +895,10 @@ async def _run_batch_vector_extraction(workers: int):
 
                 processed += 1
                 vector_task_mgr.status["current"] = processed
-                vector_task_mgr.status["percent"] = round(processed * 100 / len(tracks), 1)
+                vector_task_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
 
         try:
-            tasks = [_extract_single(t) for t in tracks]
+            tasks = [_extract_single(t) for t in to_process]
             await asyncio.gather(*tasks)
         finally:
             if executor:
@@ -858,7 +911,7 @@ async def _run_batch_vector_extraction(workers: int):
     vector_task_mgr.status["is_running"] = False
     vector_task_mgr.status["phase"] = "done"
     vector_task_mgr.status["percent"] = 100
-    vector_task_mgr.add_log(f"✓ 声学向量提取与 Qdrant 索引任务完成！已处理 {processed}/{len(tracks)} 首曲目。")
+    vector_task_mgr.add_log(f"✓ 声学向量提取与 Qdrant 索引任务完成！已处理 {processed}/{len(to_process)} 首曲目。")
 
 
 # ── Quality, Dedupe & Scrape Protected APIs ───────────────────────────────────
