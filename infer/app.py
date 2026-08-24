@@ -595,7 +595,8 @@ async def _run_micro_batch_scan(workers: int):
     scan_mgr.cancel_requested = False
     scan_mgr.status["is_running"] = True
     scan_mgr.status["phase"] = "scanning"
-    scan_mgr.add_log(f"-> 启动全盘高并发扫描 /music (并行工作线程: {workers * 2})...")
+    total_cores = os.cpu_count() or 4
+    scan_mgr.add_log(f"-> 启动全盘极速扫描 /music (系统: {total_cores}核 CPU, 精准并发: {workers} 线程, 保留1核)...")
 
     # Step 1: O(1) Checkpoint Skipping setup
     indexed_map = library_db.get_indexed_paths_with_mtime()
@@ -629,9 +630,18 @@ async def _run_micro_batch_scan(workers: int):
         return
 
     processed = 0
-    batch_size = 50
+    batch_size = 30
     loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=max(4, workers * 2))
+    executor = ThreadPoolExecutor(max_workers=workers)
+
+    async def _safe_process(file_path: str):
+        try:
+            return await asyncio.wait_for(loop.run_in_executor(executor, _process_single_audio_file, file_path), timeout=3.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout parsing {file_path}, skipped to prevent queue stalling")
+            return None
+        except Exception:
+            return None
 
     try:
         for i in range(0, len(to_process), batch_size):
@@ -640,7 +650,7 @@ async def _run_micro_batch_scan(workers: int):
                 break
 
             batch = to_process[i:i + batch_size]
-            tasks = [loop.run_in_executor(executor, _process_single_audio_file, f) for f in batch]
+            tasks = [_safe_process(f) for f in batch]
             results = await asyncio.gather(*tasks)
 
             valid_rows = [r for r in results if r is not None]
@@ -651,7 +661,7 @@ async def _run_micro_batch_scan(workers: int):
             scan_mgr.status["current"] = processed
             scan_mgr.status["total"] = len(to_process)
             scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
-            scan_mgr.add_log(f"-> 已高速并行入库 {processed}/{len(to_process)} 首曲目 ({scan_mgr.status['percent']}%)")
+            scan_mgr.add_log(f"-> 已高效入库 {processed}/{len(to_process)} 首曲目 ({scan_mgr.status['percent']}%)")
 
         # Bulk refresh artist and album aggregate stats in one fast query
         await loop.run_in_executor(None, library_db.refresh_library_aggregates)
