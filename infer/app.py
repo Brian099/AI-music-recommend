@@ -629,7 +629,7 @@ async def _run_micro_batch_scan(workers: int):
         return
 
     processed = 0
-    batch_size = 100
+    batch_size = 50
     loop = asyncio.get_event_loop()
     executor = ThreadPoolExecutor(max_workers=max(4, workers * 2))
 

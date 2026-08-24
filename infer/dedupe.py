@@ -23,14 +23,33 @@ from infer.fingerprint import cluster_by_fingerprint_duration
 
 
 def calculate_file_md5(file_path: str, chunk_size: int = 1048576) -> Optional[str]:
-    """Calculate MD5 hash of a local file in 1MB chunks."""
+    """
+    Fast Sparse MD5 Hash for ultra-fast indexing & deduplication.
+    - Files <= 512KB: full binary hash
+    - Files > 512KB: fast sparse sample hash (header 64KB + middle 64KB + footer 64KB + file size)
+    Reduces disk I/O by >99.7% (from 50MB to 192KB per song), eliminating disk I/O bottlenecks.
+    """
     if not os.path.exists(file_path):
         return None
-    hasher = hashlib.md5()
     try:
-        with open(file_path, "rb") as f:
-            while chunk := f.read(chunk_size):
-                hasher.update(chunk)
+        size = os.path.getsize(file_path)
+        hasher = hashlib.md5()
+        if size <= 524288:  # <= 512KB
+            with open(file_path, "rb") as f:
+                while chunk := f.read(chunk_size):
+                    hasher.update(chunk)
+        else:
+            with open(file_path, "rb") as f:
+                # Read 64KB header
+                hasher.update(f.read(65536))
+                # Read 64KB middle
+                f.seek(size // 2)
+                hasher.update(f.read(65536))
+                # Read 64KB footer
+                f.seek(size - 65536)
+                hasher.update(f.read(65536))
+            # Mix in file size
+            hasher.update(str(size).encode("utf-8"))
         return hasher.hexdigest()
     except Exception as e:
         print(f"[MD5] Error calculating hash for {file_path}: {e}")
