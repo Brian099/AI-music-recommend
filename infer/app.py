@@ -881,40 +881,40 @@ async def _run_batch_vector_extraction(workers: int):
             return
 
         vector_task_mgr.status["total"] = len(to_process)
+        processed = 0
 
-        sem = asyncio.Semaphore(max(1, workers))
+        # Adaptive multi-core worker pool
+        cpu_count = os.cpu_count() or 4
+        calc_workers = max(2, min(16, cpu_count - 1))
+        executor = ThreadPoolExecutor(max_workers=calc_workers)
         loop = asyncio.get_running_loop()
+        batch_size = max(16, calc_workers * 2)
 
-        # Initialize ProcessPoolExecutor, fallback to ThreadPoolExecutor if forbidden in Docker
-        executor = None
+        def _extract_worker(path: str):
+            try:
+                if not os.path.exists(path):
+                    return None
+                return extract_audio_features(path)
+            except Exception as e:
+                logger.error(f"Error in extract_audio_features for {path}: {e}")
+                return None
+
         try:
-            executor = ProcessPoolExecutor(max_workers=workers)
-            vector_task_mgr.add_log(f"-> 已成功初始化 ProcessPoolExecutor 多进程计算池 ({workers} Workers)")
-        except Exception as pe:
-            executor = ThreadPoolExecutor(max_workers=workers)
-            vector_task_mgr.add_log(f"⚠️ 多进程池创建回退至线程池: {pe}")
-
-        async def _extract_single(track):
-            nonlocal processed
-            if vector_task_mgr.cancel_requested:
-                return
-
-            path = track.get("local_path")
-            if not path or not os.path.exists(path):
-                processed += 1
-                vector_task_mgr.status["current"] = processed
-                vector_task_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
-                return
-
-            async with sem:
+            for i in range(0, len(to_process), batch_size):
                 if vector_task_mgr.cancel_requested:
-                    return
-                try:
-                    features = await loop.run_in_executor(executor, extract_audio_features, path)
-                    if features:
-                        artist_genres = features.pop("artist_genres", "pop")
-                        artist_genre_idx = features.pop("artist_genre_idx", 1)
+                    vector_task_mgr.add_log("🛑 向量提取任务已手动中止。")
+                    break
 
+                batch = to_process[i:i + batch_size]
+                tasks = [loop.run_in_executor(executor, _extract_worker, t.get("local_path", "")) for t in batch]
+                batch_features = await asyncio.gather(*tasks)
+
+                valid_rows = []
+                for track, feats in zip(batch, batch_features):
+                    path = track.get("local_path", "")
+                    if feats:
+                        artist_genres = feats.pop("artist_genres", "pop")
+                        artist_genre_idx = feats.pop("artist_genre_idx", 1)
                         row = {
                             "track_id": track.get("track_id") or str(uuid.uuid5(uuid.NAMESPACE_DNS, path)),
                             "track_name": track.get("track_name") or os.path.basename(path),
@@ -927,39 +927,36 @@ async def _run_batch_vector_extraction(workers: int):
                             "isrc": f"LOCAL_{abs(hash(path)) % 1000000}",
                             "popularity": 0.5,
                             "local_path": path,
-                            **features
+                            **feats
                         }
+                        valid_rows.append(row)
 
-                        if model:
-                            computed_feat = build_features(samples=[row], torch_device=torch.device("cpu"))
-                            with torch.no_grad():
-                                emb = model(computed_feat).cpu().numpy()[0]
-                        else:
-                            emb = np.random.randn(64).astype(np.float32)
+                if valid_rows:
+                    if model:
+                        computed_feat = build_features(samples=valid_rows, torch_device=torch.device("cpu"))
+                        with torch.no_grad():
+                            embs = model(computed_feat).cpu().numpy()
+                    else:
+                        embs = np.random.randn(len(valid_rows), 64).astype(np.float32)
 
+                    points = []
+                    for row, emb in zip(valid_rows, embs):
                         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, row["track_id"]))
                         payload = {k: row[k] for k in (
                             "track_id", "track_name", "popularity", "artist_name",
                             "artist_idx", "artist_genres", "artist_genre_idx",
                             "related_artist_idxs", "album_name", "isrc", "local_path"
                         ) if k in row}
-                        q_client.upsert(
-                            collection_name=collection_name,
-                            points=[qdrant_models.PointStruct(id=point_id, vector=emb.tolist(), payload=payload)]
-                        )
+                        points.append(qdrant_models.PointStruct(id=point_id, vector=emb.tolist(), payload=payload))
 
-                        vector_task_mgr.add_log(f"✓ 向量特征提取成功: {os.path.basename(path)} [BPM: {features.get('tempo', 0):.1f}, Genre: {artist_genres}]")
+                    if points:
+                        q_client.upsert(collection_name=collection_name, points=points)
 
-                except Exception as e:
-                    vector_task_mgr.add_log(f"⚠️ 声学特征提取出错 {os.path.basename(path)}: {e}")
-
-                processed += 1
+                processed += len(batch)
                 vector_task_mgr.status["current"] = processed
                 vector_task_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
+                vector_task_mgr.add_log(f"-> 并发提取与向量建库进度: {processed}/{len(to_process)} ({vector_task_mgr.status['percent']}%)")
 
-        try:
-            tasks = [_extract_single(t) for t in to_process]
-            await asyncio.gather(*tasks)
         finally:
             if executor:
                 executor.shutdown(wait=False)

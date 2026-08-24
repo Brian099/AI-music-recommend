@@ -292,11 +292,12 @@ class FingerprintService:
         return {"status": "ok", "total": self.total, "message": f"任务已启动，共 {self.total} 首"}
 
     async def _run_compute(self, items: List[Dict[str, Any]]):
-        # Limit worker count to max 4 to avoid 100% CPU lock
+        # Adaptive high-performance workers reserving 1 core for OS/UI
         cpu_count = os.cpu_count() or 4
-        workers = min(4, max(1, cpu_count // 2))
+        workers = max(2, min(16, cpu_count - 1))
         self._executor = ThreadPoolExecutor(max_workers=workers)
         loop = asyncio.get_event_loop()
+        batch_size = max(10, workers * 2)
 
         def _process_item(item: Dict[str, Any]) -> Tuple[bool, str]:
             path = item["local_path"]
@@ -314,21 +315,25 @@ class FingerprintService:
                 return True, "ok"
 
         try:
-            for i, item in enumerate(items):
+            for i in range(0, len(items), batch_size):
                 if self.cancel_requested:
                     self.status = "cancelled"
                     self.add_log(f"🛑 指纹计算已手动中止。已完成 {self.computed} 首，失败 {self.failed} 首。")
                     break
 
-                ok, msg = await loop.run_in_executor(self._executor, _process_item, item)
-                if ok:
-                    self.computed += 1
-                else:
-                    self.failed += 1
+                batch = items[i:i + batch_size]
+                tasks = [loop.run_in_executor(self._executor, _process_item, item) for item in batch]
+                results = await asyncio.gather(*tasks)
 
-                if (i + 1) % 10 == 0 or (i + 1) == len(items):
-                    pct = round((self.computed + self.failed) * 100 / max(1, self.total), 1)
-                    self.add_log(f"-> 进度: {self.computed + self.failed}/{self.total} ({pct}%) - 成功: {self.computed}, 失败: {self.failed}")
+                for ok, msg in results:
+                    if ok:
+                        self.computed += 1
+                    else:
+                        self.failed += 1
+
+                processed_count = self.computed + self.failed
+                pct = round(processed_count * 100 / max(1, self.total), 1)
+                self.add_log(f"-> 并发计算进度: {processed_count}/{self.total} ({pct}%) - 成功: {self.computed}, 失败: {self.failed}")
 
             if not self.cancel_requested:
                 self.status = "done"
