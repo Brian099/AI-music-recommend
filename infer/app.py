@@ -120,24 +120,40 @@ async def serve_player():
         return f.read()
 
 
-def parse_audio_file_info(file_path: str) -> dict:
+def parse_audio_file_info(file_path: str, check_db: bool = True) -> dict:
     """
     Smart 3-stage audio metadata parser:
     1. Reads SQLite database (if scraped or previously saved with valid artist)
     2. Reads Mutagen ID3 / FLAC tags from local file
     3. Fallback to smart filename regex (cleans leading track numbers, splits title/artist)
     """
-    existing = library_db.get_track_by_path(file_path)
-    if existing and existing.get("artist_name") and existing.get("artist_name") != "Unknown Artist":
-        return {
-            "title": existing.get("track_name"),
-            "artist": existing.get("artist_name"),
-            "album": existing.get("album_name") or "Local Audio"
-        }
+    if check_db:
+        existing = library_db.get_track_by_path(file_path)
+        if existing and existing.get("artist_name") and existing.get("artist_name") != "Unknown Artist":
+            return {
+                "title": existing.get("track_name"),
+                "artist": existing.get("artist_name"),
+                "album": existing.get("album_name") or "Local Audio",
+                "duration": existing.get("duration") or 180.0,
+                "bitrate": existing.get("bitrate") or 0,
+                "sample_rate": existing.get("sample_rate") or 44100
+            }
+
+    duration = 180.0
+    bitrate = 0
+    sample_rate = 44100
+    title_str = ""
+    art_str = ""
+    alb_str = ""
 
     try:
         mf = MutagenFile(file_path)
         if mf:
+            if hasattr(mf, "info"):
+                duration = float(getattr(mf.info, "length", 180.0))
+                bitrate = int(getattr(mf.info, "bitrate", 0))
+                sample_rate = int(getattr(mf.info, "sample_rate", 44100))
+
             art = mf.get("artist") or mf.get("TPE1") or mf.get("ARTIST")
             tit = mf.get("title") or mf.get("TIT2") or mf.get("TITLE")
             alb = mf.get("album") or mf.get("TALB") or mf.get("ALBUM")
@@ -157,7 +173,10 @@ def parse_audio_file_info(file_path: str) -> dict:
                 return {
                     "title": tit_str,
                     "artist": art_str,
-                    "album": alb_str or "Local Audio"
+                    "album": alb_str or "Local Audio",
+                    "duration": duration,
+                    "bitrate": bitrate,
+                    "sample_rate": sample_rate
                 }
     except Exception:
         pass
@@ -165,27 +184,31 @@ def parse_audio_file_info(file_path: str) -> dict:
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     clean_name = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", base_name).strip()
 
-    title = clean_name
-    artist = "Unknown Artist"
+    title = tit_str or clean_name
+    artist = art_str or "Unknown Artist"
 
-    if " - " in clean_name:
-        parts = clean_name.split(" - ", 1)
-        artist, title = parts[0].strip(), parts[1].strip()
-    elif "-" in clean_name and not clean_name.startswith("-"):
-        parts = clean_name.split("-", 1)
-        p1, p2 = parts[0].strip(), parts[1].strip()
-        if len(p2) <= 10 and not any(c.isdigit() for c in p2):
-            title, artist = p1, p2
-        else:
-            artist, title = p1, p2
-    elif "_" in clean_name:
-        parts = clean_name.split("_", 1)
-        artist, title = parts[0].strip(), parts[1].strip()
+    if not tit_str or artist == "Unknown Artist":
+        if " - " in clean_name:
+            parts = clean_name.split(" - ", 1)
+            artist, title = parts[0].strip(), parts[1].strip()
+        elif "-" in clean_name and not clean_name.startswith("-"):
+            parts = clean_name.split("-", 1)
+            p1, p2 = parts[0].strip(), parts[1].strip()
+            if len(p2) <= 10 and not any(c.isdigit() for c in p2):
+                title, artist = p1, p2
+            else:
+                artist, title = p1, p2
+        elif "_" in clean_name:
+            parts = clean_name.split("_", 1)
+            artist, title = parts[0].strip(), parts[1].strip()
 
     return {
         "title": title or base_name,
         "artist": artist or "Unknown Artist",
-        "album": "Local Audio"
+        "album": alb_str or "Local Audio",
+        "duration": duration,
+        "bitrate": bitrate,
+        "sample_rate": sample_rate
     }
 
 
@@ -539,12 +562,40 @@ async def stop_scan():
     scan_mgr.cancel_requested = True
     return {"status": "ok", "message": "中止请求已发送"}
 
+def _process_single_audio_file(file_path: str) -> Optional[Dict[str, Any]]:
+    try:
+        if not os.path.exists(file_path):
+            return None
+        size = os.path.getsize(file_path)
+        mtime = os.path.getmtime(file_path)
+        md5 = calculate_file_md5(file_path)
+        info = parse_audio_file_info(file_path, check_db=False)
+
+        return {
+            "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, file_path)),
+            "local_path": file_path,
+            "track_name": info["title"],
+            "artist_name": info["artist"],
+            "album_name": info.get("album", "Local Audio"),
+            "duration": info.get("duration", 180.0),
+            "bitrate": info.get("bitrate", 0),
+            "sample_rate": info.get("sample_rate", 0),
+            "format": os.path.splitext(file_path)[1].lstrip(".").lower(),
+            "file_size": size,
+            "mtime": mtime,
+            "md5": md5
+        }
+    except Exception as e:
+        logger.error(f"Error parsing audio file {file_path}: {e}")
+        return None
+
+
 async def _run_micro_batch_scan(workers: int):
     scan_mgr.is_running = True
     scan_mgr.cancel_requested = False
     scan_mgr.status["is_running"] = True
     scan_mgr.status["phase"] = "scanning"
-    scan_mgr.add_log(f"-> 启动全盘扫描 /music (保留1个核心, 并发线程: {workers})...")
+    scan_mgr.add_log(f"-> 启动全盘高并发扫描 /music (并行工作线程: {workers * 2})...")
 
     # Step 1: O(1) Checkpoint Skipping setup
     indexed_map = library_db.get_indexed_paths_with_mtime()
@@ -558,11 +609,14 @@ async def _run_micro_batch_scan(workers: int):
     to_process = []
     skipped_count = 0
     for f in audio_files:
-        mtime = os.path.getmtime(f)
-        if f in indexed_map and abs(indexed_map[f] - mtime) < 1.0:
-            skipped_count += 1
-        else:
-            to_process.append(f)
+        try:
+            mtime = os.path.getmtime(f)
+            if f in indexed_map and abs(indexed_map[f] - mtime) < 1.0:
+                skipped_count += 1
+            else:
+                to_process.append(f)
+        except OSError:
+            continue
 
     scan_mgr.add_log(f"-> 扫描发现文件 {len(audio_files)} 首，秒级跳过已处理 {skipped_count} 首，剩余待处理 {len(to_process)} 首。")
 
@@ -575,38 +629,35 @@ async def _run_micro_batch_scan(workers: int):
         return
 
     processed = 0
+    batch_size = 100
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=max(4, workers * 2))
 
-    for i in range(0, len(to_process), 20):
-        if scan_mgr.cancel_requested:
-            scan_mgr.add_log("🛑 扫描任务已手动中止。")
-            break
+    try:
+        for i in range(0, len(to_process), batch_size):
+            if scan_mgr.cancel_requested:
+                scan_mgr.add_log("🛑 扫描任务已手动中止。")
+                break
 
-        batch = to_process[i:i+20]
-        for f in batch:
-            try:
-                md5 = await asyncio.to_thread(calculate_file_md5, f)
-                info = parse_audio_file_info(f)
+            batch = to_process[i:i + batch_size]
+            tasks = [loop.run_in_executor(executor, _process_single_audio_file, f) for f in batch]
+            results = await asyncio.gather(*tasks)
 
-                row = {
-                    "track_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f)),
-                    "local_path": f,
-                    "track_name": info["title"],
-                    "artist_name": info["artist"],
-                    "album_name": info.get("album", "Local Audio"),
-                    "duration": 180.0,
-                    "file_size": os.path.getsize(f),
-                    "mtime": os.path.getmtime(f),
-                    "md5": md5
-                }
-                library_db.upsert_track(row)
-                processed += 1
-            except Exception as e:
-                print(f"Error scanning {f}: {e}")
+            valid_rows = [r for r in results if r is not None]
+            if valid_rows:
+                await loop.run_in_executor(None, library_db.upsert_tracks_batch, valid_rows)
+                processed += len(valid_rows)
 
-        scan_mgr.status["current"] = processed
-        scan_mgr.status["total"] = len(to_process)
-        scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
-        scan_mgr.add_log(f"-> 已成功扫描入库 {processed}/{len(to_process)} 首曲目 ({scan_mgr.status['percent']}%)")
+            scan_mgr.status["current"] = processed
+            scan_mgr.status["total"] = len(to_process)
+            scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
+            scan_mgr.add_log(f"-> 已高速并行入库 {processed}/{len(to_process)} 首曲目 ({scan_mgr.status['percent']}%)")
+
+        # Bulk refresh artist and album aggregate stats in one fast query
+        await loop.run_in_executor(None, library_db.refresh_library_aggregates)
+
+    finally:
+        executor.shutdown(wait=False)
 
     scan_mgr.is_running = False
     scan_mgr.status["is_running"] = False

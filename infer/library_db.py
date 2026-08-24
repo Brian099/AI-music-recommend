@@ -234,6 +234,120 @@ class LibraryDatabase:
 
             conn.commit()
 
+    def upsert_tracks_batch(self, tracks: List[Dict[str, Any]]):
+        """Batch upsert multiple tracks in a single atomic SQLite transaction."""
+        if not tracks:
+            return
+        now = time.time()
+        params = []
+        for track in tracks:
+            local_path = track["local_path"]
+            album_name = track.get("album_name") or "Unknown Album"
+            artist_name = track.get("artist_name") or "Unknown Artist"
+            params.append({
+                "track_id": track.get("track_id"),
+                "local_path": local_path,
+                "track_name": track.get("track_name", "Unknown Track"),
+                "artist_name": artist_name,
+                "album_name": album_name,
+                "duration": track.get("duration", 0.0),
+                "bitrate": track.get("bitrate", 0),
+                "sample_rate": track.get("sample_rate", 0),
+                "format": track.get("format", os.path.splitext(local_path)[1].lstrip('.')),
+                "file_size": track.get("file_size", 0),
+                "mtime": track.get("mtime", 0.0),
+                "md5": track.get("md5"),
+                "fingerprint": track.get("fingerprint", ""),
+                "fingerprint_duration": track.get("fingerprint_duration", 0.0),
+                "fingerprint_attempted_at": track.get("fingerprint_attempted_at", 0.0),
+                "genre": track.get("genre"),
+                "year": track.get("year"),
+                "track_number": track.get("track_number"),
+                "cover_path": track.get("cover_path"),
+                "lyrics_path": track.get("lyrics_path"),
+                "is_true_lossless": track.get("is_true_lossless"),
+                "cutoff_freq": track.get("cutoff_freq"),
+                "quality_rating": track.get("quality_rating"),
+                "scraped_at": track.get("scraped_at"),
+                "created_at": now,
+                "updated_at": now
+            })
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany("""
+            INSERT INTO tracks (
+                track_id, local_path, track_name, artist_name, album_name,
+                duration, bitrate, sample_rate, format, file_size, mtime, md5,
+                fingerprint, fingerprint_duration, fingerprint_attempted_at,
+                genre, year, track_number, cover_path, lyrics_path,
+                is_true_lossless, cutoff_freq, quality_rating, scraped_at,
+                created_at, updated_at
+            ) VALUES (
+                :track_id, :local_path, :track_name, :artist_name, :album_name,
+                :duration, :bitrate, :sample_rate, :format, :file_size, :mtime, :md5,
+                :fingerprint, :fingerprint_duration, :fingerprint_attempted_at,
+                :genre, :year, :track_number, :cover_path, :lyrics_path,
+                :is_true_lossless, :cutoff_freq, :quality_rating, :scraped_at,
+                :created_at, :updated_at
+            ) ON CONFLICT(local_path) DO UPDATE SET
+                track_name = excluded.track_name,
+                artist_name = excluded.artist_name,
+                album_name = excluded.album_name,
+                duration = excluded.duration,
+                bitrate = excluded.bitrate,
+                sample_rate = excluded.sample_rate,
+                format = excluded.format,
+                file_size = excluded.file_size,
+                mtime = excluded.mtime,
+                md5 = COALESCE(excluded.md5, tracks.md5),
+                fingerprint = CASE WHEN excluded.fingerprint != '' THEN excluded.fingerprint ELSE tracks.fingerprint END,
+                fingerprint_duration = CASE WHEN excluded.fingerprint_duration > 0 THEN excluded.fingerprint_duration ELSE tracks.fingerprint_duration END,
+                fingerprint_attempted_at = CASE WHEN excluded.fingerprint_attempted_at > 0 THEN excluded.fingerprint_attempted_at ELSE tracks.fingerprint_attempted_at END,
+                genre = COALESCE(excluded.genre, tracks.genre),
+                year = COALESCE(excluded.year, tracks.year),
+                track_number = COALESCE(excluded.track_number, tracks.track_number),
+                cover_path = COALESCE(excluded.cover_path, tracks.cover_path),
+                lyrics_path = COALESCE(excluded.lyrics_path, tracks.lyrics_path),
+                is_true_lossless = COALESCE(excluded.is_true_lossless, tracks.is_true_lossless),
+                cutoff_freq = COALESCE(excluded.cutoff_freq, tracks.cutoff_freq),
+                quality_rating = COALESCE(excluded.quality_rating, tracks.quality_rating),
+                scraped_at = COALESCE(excluded.scraped_at, tracks.scraped_at),
+                updated_at = excluded.updated_at;
+            """, params)
+            conn.commit()
+
+    def refresh_library_aggregates(self):
+        """Bulk refresh artists and albums tables in single optimized SQL queries."""
+        now = time.time()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO artists (artist_name, track_count, album_count, genre, cover_path, updated_at)
+            SELECT artist_name, COUNT(*), COUNT(DISTINCT album_name), MAX(genre), MAX(cover_path), ?
+            FROM tracks WHERE artist_name != ''
+            GROUP BY artist_name
+            ON CONFLICT(artist_name) DO UPDATE SET
+                track_count = excluded.track_count,
+                album_count = excluded.album_count,
+                genre = COALESCE(excluded.genre, artists.genre),
+                cover_path = COALESCE(excluded.cover_path, artists.cover_path),
+                updated_at = excluded.updated_at;
+            """, (now,))
+
+            cursor.execute("""
+            INSERT INTO albums (album_key, album_name, artist_name, track_count, year, cover_path, updated_at)
+            SELECT (artist_name || ' - ' || album_name), album_name, artist_name, COUNT(*), MAX(year), MAX(cover_path), ?
+            FROM tracks WHERE album_name != ''
+            GROUP BY artist_name, album_name
+            ON CONFLICT(album_key) DO UPDATE SET
+                track_count = excluded.track_count,
+                year = COALESCE(excluded.year, albums.year),
+                cover_path = COALESCE(excluded.cover_path, albums.cover_path),
+                updated_at = excluded.updated_at;
+            """, (now,))
+            conn.commit()
+
     def get_indexed_paths_with_mtime(self) -> Dict[str, float]:
         """Returns {local_path: mtime} map for O(1) instant resumable checkpoint skipping."""
         with self.get_connection() as conn:

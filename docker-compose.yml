@@ -14,7 +14,7 @@ services:
     image: brian9909/ai-music-recommend:latest
     container_name: embeat-api-service
     ports:
-      - "8000:8000"
+      - "6335:8000"
     volumes:
       # 挂载宿主机测试音乐文件夹到容器内的 /music，供离线提取与试听
       - ./测试音乐:/music
