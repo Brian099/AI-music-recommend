@@ -650,18 +650,22 @@ async def _run_micro_batch_scan(workers: int):
                 break
 
             batch = to_process[i:i + batch_size]
-            tasks = [_safe_process(f) for f in batch]
-            results = await asyncio.gather(*tasks)
+            tasks = [asyncio.create_task(_safe_process(f)) for f in batch]
 
-            valid_rows = [r for r in results if r is not None]
-            if valid_rows:
-                await loop.run_in_executor(None, library_db.upsert_tracks_batch, valid_rows)
-                processed += len(valid_rows)
+            valid_batch = []
+            for coro in asyncio.as_completed(tasks):
+                res = await coro
+                if res:
+                    valid_batch.append(res)
+                processed += 1
+                if processed % 30 == 0 or processed == len(to_process):
+                    scan_mgr.status["current"] = processed
+                    scan_mgr.status["total"] = len(to_process)
+                    scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
+                    scan_mgr.add_log(f"-> 实时扫描进度: {processed}/{len(to_process)} 首 ({scan_mgr.status['percent']}%)")
 
-            scan_mgr.status["current"] = processed
-            scan_mgr.status["total"] = len(to_process)
-            scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
-            scan_mgr.add_log(f"-> 已高效入库 {processed}/{len(to_process)} 首曲目 ({scan_mgr.status['percent']}%)")
+            if valid_batch:
+                await loop.run_in_executor(None, library_db.upsert_tracks_batch, valid_batch)
 
         # Bulk refresh artist and album aggregate stats in one fast query
         await loop.run_in_executor(None, library_db.refresh_library_aggregates)
