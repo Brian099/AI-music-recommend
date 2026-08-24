@@ -115,6 +115,7 @@ class LibraryDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_md5 ON tracks(md5);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_fingerprint ON tracks(fingerprint);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(local_path);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist_track ON tracks(artist_name, track_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_path);")
 
             conn.commit()
@@ -485,6 +486,72 @@ class LibraryDatabase:
               AND (fingerprint_attempted_at = 0 OR fingerprint_attempted_at IS NULL);
             """)
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_all_md5_duplicate_groups(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Ultra-fast batch query: retrieves all MD5 duplicate groups in a single SQL operation."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM tracks
+            WHERE md5 IN (
+                SELECT md5 FROM tracks
+                WHERE md5 != '' AND md5 IS NOT NULL
+                GROUP BY md5 HAVING COUNT(*) > 1
+            )
+            ORDER BY md5, duration DESC, bitrate DESC, file_size DESC;
+            """)
+            groups = {}
+            for row in cursor.fetchall():
+                t = dict(row)
+                m = t["md5"]
+                if m not in groups:
+                    groups[m] = []
+                groups[m].append(t)
+            return groups
+
+    def get_all_fingerprint_duplicate_groups(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Ultra-fast batch query: retrieves all fingerprint duplicate groups in a single SQL operation."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM tracks
+            WHERE fingerprint IN (
+                SELECT fingerprint FROM tracks
+                WHERE fingerprint != '' AND fingerprint IS NOT NULL
+                GROUP BY fingerprint HAVING COUNT(*) > 1
+            )
+            ORDER BY fingerprint, duration DESC, bitrate DESC, file_size DESC;
+            """)
+            groups = {}
+            for row in cursor.fetchall():
+                t = dict(row)
+                fp = t["fingerprint"]
+                if fp not in groups:
+                    groups[fp] = []
+                groups[fp].append(t)
+            return groups
+
+    def get_all_metadata_duplicate_groups(self) -> List[List[Dict[str, Any]]]:
+        """Ultra-fast batch query: retrieves all exact artist+title duplicate groups in a single SQL operation."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM tracks
+            WHERE (artist_name, track_name) IN (
+                SELECT artist_name, track_name FROM tracks
+                WHERE artist_name != '' AND artist_name != 'Unknown Artist' AND track_name != ''
+                GROUP BY artist_name, track_name HAVING COUNT(*) > 1
+            )
+            ORDER BY artist_name, track_name, duration DESC, bitrate DESC, file_size DESC;
+            """)
+            groups_map = {}
+            for row in cursor.fetchall():
+                t = dict(row)
+                key = (t["artist_name"].strip().lower(), t["track_name"].strip().lower())
+                if key not in groups_map:
+                    groups_map[key] = []
+                groups_map[key].append(t)
+            return list(groups_map.values())
 
     def list_duplicate_md5s(self) -> List[str]:
         """Finds all MD5 hashes that appear more than once via B-Tree index."""

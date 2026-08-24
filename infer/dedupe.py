@@ -58,29 +58,27 @@ def calculate_file_md5(file_path: str, chunk_size: int = 1048576) -> Optional[st
 
 def find_duplicates() -> List[Dict[str, Any]]:
     """
-    Scans library_db for duplicate groups using B-Tree index pushdown:
-    1. Exact MD5 binary hash duplicates (O(1) index lookup)
-    2. Chromaprint acoustic fingerprints with Duration Guard clustering (O(1) index lookup)
-    3. Metadata (Artist + Title) exact/normalized duplicates with Duration Guard
+    Scans library_db for duplicate groups using B-Tree index pushdown batch operations:
+    1. Exact MD5 binary hash duplicates (Single batch query)
+    2. Chromaprint acoustic fingerprints with Duration Guard clustering (Single batch query)
+    3. Metadata (Artist + Title) exact duplicates with Duration Guard (Single batch query)
     Returns a structured list of duplicate clusters with Smart Keep recommendations in milliseconds.
     """
     duplicate_clusters: List[Dict[str, Any]] = []
     processed_paths = set()
 
-    # ── Tier 1: Exact MD5 Hash Duplicates via Index ───────────────────────────
-    dup_md5s = library_db.list_duplicate_md5s()
-    for md5 in dup_md5s:
-        group = library_db.get_tracks_by_md5(md5)
+    # ── Tier 1: Exact MD5 Hash Duplicates (Batch Query) ──────────────────────
+    md5_groups = library_db.get_all_md5_duplicate_groups()
+    for md5, group in md5_groups.items():
         if len(group) > 1:
             cluster = _build_duplicate_cluster(group, match_type="Exact MD5 Match (二进制强一致重复)")
             duplicate_clusters.append(cluster)
             for t in group:
                 processed_paths.add(t["local_path"])
 
-    # ── Tier 2: Chromaprint Acoustic Fingerprints via Index + Duration Guard ──
-    dup_fps = library_db.list_duplicate_fingerprints()
-    for fp in dup_fps:
-        tracks = library_db.get_tracks_by_fingerprint(fp)
+    # ── Tier 2: Chromaprint Acoustic Fingerprints (Batch Query + Duration Guard)
+    fp_groups = library_db.get_all_fingerprint_duplicate_groups()
+    for fp, tracks in fp_groups.items():
         unprocessed = [t for t in tracks if t["local_path"] not in processed_paths]
         if len(unprocessed) > 1:
             clusters = cluster_by_fingerprint_duration(unprocessed, tolerance=30.0)
@@ -91,11 +89,10 @@ def find_duplicates() -> List[Dict[str, Any]]:
                     for t in cl:
                         processed_paths.add(t["local_path"])
 
-    # ── Tier 3: Metadata Exact Keys via Index + Duration Guard ────────────────
-    dup_meta_keys = library_db.list_duplicate_metadata_keys()
-    for art, tit in dup_meta_keys:
-        tracks = library_db.get_tracks_by_artist_and_title(art, tit)
-        unprocessed = [t for t in tracks if t["local_path"] not in processed_paths]
+    # ── Tier 3: Metadata Exact Keys (Batch Query + Duration Guard) ────────────
+    meta_groups = library_db.get_all_metadata_duplicate_groups()
+    for group in meta_groups:
+        unprocessed = [t for t in group if t["local_path"] not in processed_paths]
         if len(unprocessed) > 1:
             clusters = cluster_by_fingerprint_duration(unprocessed, tolerance=40.0)
             for cl in clusters:
@@ -104,8 +101,6 @@ def find_duplicates() -> List[Dict[str, Any]]:
                     duplicate_clusters.append(cluster)
                     for t in cl:
                         processed_paths.add(t["local_path"])
-
-    return duplicate_clusters
 
     return duplicate_clusters
 
@@ -172,7 +167,7 @@ def _build_duplicate_cluster(tracks: List[Dict[str, Any]], match_type: str) -> D
 def resolve_duplicate(delete_path: str, safe_trash: bool = True) -> Dict[str, Any]:
     """
     Safely delete duplicate audio file or move it to data/trash.
-    Also removes the record from library_db and Qdrant.
+    Also removes the record from library_db and Qdrant vector index.
     """
     if not os.path.exists(delete_path):
         library_db.delete_track(delete_path)
@@ -200,7 +195,7 @@ def resolve_duplicate(delete_path: str, safe_trash: bool = True) -> Dict[str, An
 
 
 def resolve_batch_duplicates(delete_paths: List[str], safe_trash: bool = True) -> Dict[str, Any]:
-    """Batch resolves multiple duplicate audio paths."""
+    """Batch resolves multiple duplicate audio paths and cleans up database + Qdrant vectors."""
     success_count = 0
     errors = []
 
@@ -221,18 +216,20 @@ def resolve_batch_duplicates(delete_paths: List[str], safe_trash: bool = True) -
 
 
 def _delete_qdrant_point(file_path: str):
-    """Clean up vector point from Qdrant if collection exists."""
+    """Clean up vector point from Qdrant if collection exists (gracefully ignore if offline)."""
     try:
         from qdrant_client import QdrantClient
         from qdrant_client.http import models as qdrant_models
-        from infer.app import QDRANT_URL, COLLECTION_NAME
-        client = QdrantClient(url=QDRANT_URL, timeout=2.0)
+        qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
+        collection_name = "spotify_tracks"
+        client = QdrantClient(url=qdrant_url, timeout=1.5)
         track_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, file_path))
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, track_id))
         client.delete(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             points_selector=qdrant_models.PointIdsList(points=[point_id])
         )
         client.close()
     except Exception:
+        # Gracefully pass if Qdrant is offline or not installed
         pass

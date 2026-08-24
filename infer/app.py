@@ -142,7 +142,7 @@ def parse_audio_file_info(file_path: str, check_db: bool = True) -> dict:
     duration = 180.0
     bitrate = 0
     sample_rate = 44100
-    title_str = ""
+    tit_str = ""
     art_str = ""
     alb_str = ""
 

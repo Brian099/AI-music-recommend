@@ -15,7 +15,11 @@ from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredenti
 # Default admin password can be customized via ADMIN_PASSWORD environment variable
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
-# Session token storage: {token: expire_timestamp}
+import hmac
+import hashlib
+
+# Secret key derived from ADMIN_PASSWORD for stateless HMAC token verification
+_AUTH_SECRET = hashlib.sha256(ADMIN_PASSWORD.encode("utf-8")).digest()
 _VALID_TOKENS: dict[str, float] = {}
 
 # Security schemes
@@ -31,22 +35,45 @@ def verify_password(password: str) -> bool:
 
 
 def create_admin_token() -> str:
-    """Generate a new secure admin token valid for 7 days."""
-    token = secrets.token_hex(32)
-    expire_at = time.time() + (7 * 86400)  # 7 days
+    """Generate a new secure HMAC-signed admin token valid for 7 days."""
+    expire_at = int(time.time() + (7 * 86400))  # 7 days
+    nonce = secrets.token_hex(8)
+    payload = f"{expire_at}:{nonce}"
+    sig = hmac.new(_AUTH_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    token = f"{payload}:{sig}"
     _VALID_TOKENS[token] = expire_at
     return token
 
 
 def is_valid_token(token: str) -> bool:
     """Validate token and check expiration."""
-    if not token or token not in _VALID_TOKENS:
+    if not token or not isinstance(token, str):
         return False
-    expire_at = _VALID_TOKENS[token]
-    if time.time() > expire_at:
-        del _VALID_TOKENS[token]
-        return False
-    return True
+    
+    # 1. Check in-memory cache
+    if token in _VALID_TOKENS:
+        if time.time() > _VALID_TOKENS[token]:
+            del _VALID_TOKENS[token]
+            return False
+        return True
+
+    # 2. Check signed HMAC token format: {expire_at}:{nonce}:{signature}
+    parts = token.split(":")
+    if len(parts) == 3:
+        try:
+            expire_at_str, nonce, sig = parts
+            expire_at = int(expire_at_str)
+            if time.time() > expire_at:
+                return False
+            payload = f"{expire_at}:{nonce}"
+            expected_sig = hmac.new(_AUTH_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+            if secrets.compare_digest(sig, expected_sig):
+                _VALID_TOKENS[token] = expire_at
+                return True
+        except Exception:
+            return False
+
+    return False
 
 
 async def require_admin_auth(

@@ -369,21 +369,66 @@
             if (viewPanel) viewPanel.classList.add('active');
         }
 
+        async function adminFetch(url, options = {}) {
+            options.headers = options.headers || {};
+            if (adminToken && !options.headers["X-Admin-Token"]) {
+                options.headers["X-Admin-Token"] = adminToken;
+            }
+
+            let res;
+            try {
+                res = await fetch(url, options);
+            } catch (networkErr) {
+                throw new Error(`网络连接失败或后端服务未运行: ${networkErr.message}`);
+            }
+
+            if (res.status === 401) {
+                document.getElementById("login-modal").style.display = "flex";
+                throw new Error("管理员认证凭证已过期或无效，请重新输入密码登录。");
+            }
+
+            const contentType = res.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                const text = await res.text();
+                if (!res.ok) {
+                    throw new Error(`服务器响应异常 (${res.status}): ${text.substring(0, 120)}`);
+                }
+                throw new Error(`预期返回 JSON 格式，但收到响应 (${res.status}): ${text.substring(0, 120)}`);
+            }
+
+            let data;
+            try {
+                data = await res.json();
+            } catch (parseErr) {
+                throw new Error(`解析服务器返回数据失败: ${parseErr.message}`);
+            }
+
+            if (!res.ok) {
+                const errMsg = (data && (data.detail || data.message)) || `HTTP ${res.status}`;
+                throw new Error(errMsg);
+            }
+            return data;
+        }
+
         async function doLogin() {
             const pass = document.getElementById("admin-pass").value;
-            const res = await fetch("/api/admin/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ password: pass })
-            });
-            const data = await res.json();
-            if (data.status === "ok") {
-                adminToken = data.token;
-                localStorage.setItem("admin_token", adminToken);
-                document.getElementById("login-modal").style.display = "none";
-                loadAdminStatus();
-            } else {
-                alert("密码错误");
+            try {
+                const res = await fetch("/api/admin/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password: pass })
+                });
+                const data = await res.json();
+                if (data.status === "ok") {
+                    adminToken = data.token;
+                    localStorage.setItem("admin_token", adminToken);
+                    document.getElementById("login-modal").style.display = "none";
+                    loadAdminStatus();
+                } else {
+                    alert("密码错误");
+                }
+            } catch (err) {
+                alert(`登录请求异常: ${err.message}`);
             }
         }
 
@@ -437,14 +482,7 @@
 
         async function loadAdminStatus() {
             try {
-                const res = await fetch("/api/admin/status", {
-                    headers: { "X-Admin-Token": adminToken }
-                });
-                if (res.status === 401) {
-                    document.getElementById("login-modal").style.display = "flex";
-                    return;
-                }
-                const data = await res.json();
+                const data = await adminFetch("/api/admin/status");
                 document.getElementById("db-status").innerText = data.has_global_db ? "🟢 4500万预置数据库: 已就绪" : "⚪ 纯本地轻量模式: 运行中";
                 document.getElementById("cpu-status").innerText = `⚙️ CPU: ${data.cpu.total_cpus}核 | 并发: ${data.cpu.max_workers}线程`;
 
@@ -507,90 +545,123 @@
 
         // 1. Scan Actions
         async function startScan() {
-            const res = await fetch("/api/scan/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            const data = await res.json();
-            alert(data.message || "增量扫描已启动！");
-            loadAdminStatus();
+            try {
+                const data = await adminFetch("/api/scan/start", { method: "POST" });
+                alert(data.message || "增量扫描已启动！");
+                loadAdminStatus();
+            } catch (err) {
+                alert(`启动失败: ${err.message}`);
+            }
         }
 
         async function stopScan() {
-            await fetch("/api/scan/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            loadAdminStatus();
+            try {
+                await adminFetch("/api/scan/stop", { method: "POST" });
+                loadAdminStatus();
+            } catch (err) {
+                console.error("Stop scan error:", err);
+            }
         }
 
         // 2. Scrape Actions
         async function startBatchScrape() {
-            const res = await fetch("/api/scrape/batch/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            const data = await res.json();
-            alert(data.message || "全库批量刮削已启动！");
-            loadAdminStatus();
+            try {
+                const data = await adminFetch("/api/scrape/batch/start", { method: "POST" });
+                alert(data.message || "全库批量刮削已启动！");
+                loadAdminStatus();
+            } catch (err) {
+                alert(`启动失败: ${err.message}`);
+            }
         }
 
         async function stopBatchScrape() {
-            await fetch("/api/scrape/batch/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            loadAdminStatus();
+            try {
+                await adminFetch("/api/scrape/batch/stop", { method: "POST" });
+                loadAdminStatus();
+            } catch (err) {
+                console.error("Stop scrape error:", err);
+            }
         }
 
         async function scrapeSingleTrack() {
             const path = document.getElementById("scrape-path").value;
             if (!path) { alert("请输入音频文件路径"); return; }
-            const res = await fetch(`/api/scrape/track?path=${encodeURIComponent(path)}`, {
-                method: "POST", headers: { "X-Admin-Token": adminToken }
-            });
-            const data = await res.json();
-            alert(data.status === "ok" ? "✓ 单曲在线刮削并嵌入成功！" : "✗ 刮削失败");
-            loadAdminStatus();
+            try {
+                const data = await adminFetch(`/api/scrape/track?path=${encodeURIComponent(path)}`, {
+                    method: "POST"
+                });
+                alert(data.status === "ok" ? "✓ 单曲在线刮削并嵌入成功！" : "✗ 刮削失败");
+                loadAdminStatus();
+            } catch (err) {
+                alert(`刮削异常: ${err.message}`);
+            }
         }
 
         // 3. Vector Extract Actions
         async function startVectorExtract() {
-            const res = await fetch("/api/vector/extract/start", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            const data = await res.json();
-            alert(data.message || "AI 声学向量提取已启动！");
-            loadAdminStatus();
+            try {
+                const data = await adminFetch("/api/vector/extract/start", { method: "POST" });
+                alert(data.message || "AI 声学向量提取已启动！");
+                loadAdminStatus();
+            } catch (err) {
+                alert(`启动失败: ${err.message}`);
+            }
         }
 
         async function stopVectorExtract() {
-            await fetch("/api/vector/extract/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            loadAdminStatus();
+            try {
+                await adminFetch("/api/vector/extract/stop", { method: "POST" });
+                loadAdminStatus();
+            } catch (err) {
+                console.error("Stop vector error:", err);
+            }
         }
 
         // 4. Chromaprint Fingerprint Actions (Songloft Port)
         async function startFingerprint(mode) {
-            const res = await fetch(`/api/fingerprint/start?mode=${encodeURIComponent(mode)}`, {
-                method: "POST", headers: { "X-Admin-Token": adminToken }
-            });
-            const data = await res.json();
-            if (data.status === "error") {
-                alert("启动失败: " + data.message);
-            } else {
-                alert(data.message || "指纹计算任务已启动！");
+            try {
+                const data = await adminFetch(`/api/fingerprint/start?mode=${encodeURIComponent(mode)}`, {
+                    method: "POST"
+                });
+                if (data.status === "error") {
+                    alert("启动失败: " + data.message);
+                } else {
+                    alert(data.message || "指纹计算任务已启动！");
+                }
+                loadAdminStatus();
+            } catch (err) {
+                alert(`启动失败: ${err.message}`);
             }
-            loadAdminStatus();
         }
 
         async function stopFingerprint() {
-            await fetch("/api/fingerprint/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
-            loadAdminStatus();
+            try {
+                await adminFetch("/api/fingerprint/stop", { method: "POST" });
+                loadAdminStatus();
+            } catch (err) {
+                console.error("Stop fingerprint error:", err);
+            }
         }
 
         // 5. Quality & Dedupe Actions
         async function inspectLossless() {
             const path = document.getElementById("inspect-path").value;
             if (!path) { alert("请输入音频文件路径"); return; }
-            const res = await fetch(`/api/quality/analyze?path=${encodeURIComponent(path)}`, {
-                method: "POST", headers: { "X-Admin-Token": adminToken }
-            });
-            const data = await res.json();
-            document.getElementById("inspect-result").innerText = `判定结果: ${data.quality_rating} (高频截止点: ${data.cutoff_freq} Hz)`;
+            try {
+                const data = await adminFetch(`/api/quality/analyze?path=${encodeURIComponent(path)}`, {
+                    method: "POST"
+                });
+                document.getElementById("inspect-result").innerText = `判定结果: ${data.quality_rating} (高频截止点: ${data.cutoff_freq} Hz)`;
+            } catch (err) {
+                alert(`分析失败: ${err.message}`);
+            }
         }
 
         async function runDedupeScan() {
             const box = document.getElementById("dedupe-results");
             box.innerHTML = `<div style="color: var(--primary); padding:10px 0;">⏳ 正在执行多维度查重比对 (MD5 哈希 + Chromaprint 声学指纹 + 元数据)...</div>`;
             try {
-                const res = await fetch("/api/dedupe/scan", { headers: { "X-Admin-Token": adminToken } });
-                const data = await res.json();
+                const data = await adminFetch("/api/dedupe/scan");
                 if (!data || data.length === 0) {
                     box.innerHTML = `<div style="color: var(--accent-green); margin-top: 6px; padding:12px; background:rgba(0,255,136,0.06); border-radius:8px;">✓ 恭喜！未在音频库中发现重复音乐。</div>`;
                     return;
@@ -660,19 +731,26 @@
                 box.innerHTML = html;
                 window._latestDedupeClusters = data;
             } catch (err) {
-                box.innerHTML = `<div style="color: var(--accent-red); padding:10px;">扫描出错: ${err}</div>`;
+                box.innerHTML = `<div style="color: var(--accent-red); padding:14px; background:rgba(255,71,87,0.08); border:1px solid rgba(255,71,87,0.25); border-radius:8px;">
+                    <div style="font-weight:700; margin-bottom:6px;">⚠️ 扫描未能完成</div>
+                    <div style="font-size:12px; opacity:0.9;">${err.message || err}</div>
+                    <button class="btn" style="margin-top:10px; background:var(--primary); font-size:12px; padding:6px 14px;" onclick="runDedupeScan()">🔄 重新扫描</button>
+                </div>`;
             }
         }
 
         async function resolveSingleDuplicate(encodedPath) {
             const path = decodeURIComponent(encodedPath);
             if (!confirm(`确定将该重复音频移入回收站 (data/trash) 吗？\n${path}`)) return;
-            const res = await fetch(`/api/dedupe/resolve?path=${encodeURIComponent(path)}`, {
-                method: "POST", headers: { "X-Admin-Token": adminToken }
-            });
-            const data = await res.json();
-            alert(data.message || "处理完成");
-            runDedupeScan();
+            try {
+                const data = await adminFetch(`/api/dedupe/resolve?path=${encodeURIComponent(path)}`, {
+                    method: "POST"
+                });
+                alert(data.message || "处理完成");
+                runDedupeScan();
+            } catch (err) {
+                alert(`清理失败: ${err.message}`);
+            }
         }
 
         async function resolveAllDuplicates() {
@@ -694,14 +772,17 @@
 
             if (!confirm(`确定一键将所有 ${toDelete.length} 首建议清理的重复音频移入回收站 (data/trash) 吗？`)) return;
 
-            const res = await fetch("/api/dedupe/resolve_batch", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Admin-Token": adminToken },
-                body: JSON.stringify({ paths: toDelete, safe_trash: true })
-            });
-            const data = await res.json();
-            alert(data.message || `✓ 已成功清理 ${data.resolved_count} 个重复音频！`);
-            runDedupeScan();
+            try {
+                const data = await adminFetch("/api/dedupe/resolve_batch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ paths: toDelete, safe_trash: true })
+                });
+                alert(data.message || `✓ 已成功清理 ${data.resolved_count} 个重复音频！`);
+                runDedupeScan();
+            } catch (err) {
+                alert(`一键清理失败: ${err.message}`);
+            }
         }
     </script>
 </body>
