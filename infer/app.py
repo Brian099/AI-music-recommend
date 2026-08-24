@@ -595,8 +595,7 @@ async def _run_micro_batch_scan(workers: int):
     scan_mgr.cancel_requested = False
     scan_mgr.status["is_running"] = True
     scan_mgr.status["phase"] = "scanning"
-    total_cores = os.cpu_count() or 4
-    scan_mgr.add_log(f"-> 启动全盘极速扫描 /music (系统: {total_cores}核 CPU, 精准并发: {workers} 线程, 保留1核)...")
+    scan_mgr.add_log("-> 启动全盘轻量极速扫描 /music (防卡死顺序流式读取 + 批量事务提交)...")
 
     # Step 1: O(1) Checkpoint Skipping setup
     indexed_map = library_db.get_indexed_paths_with_mtime()
@@ -630,48 +629,36 @@ async def _run_micro_batch_scan(workers: int):
         return
 
     processed = 0
-    batch_size = 30
+    batch_buffer = []
+    batch_size = 50
     loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=workers)
 
-    async def _safe_process(file_path: str):
-        try:
-            return await asyncio.wait_for(loop.run_in_executor(executor, _process_single_audio_file, file_path), timeout=3.0)
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout parsing {file_path}, skipped to prevent queue stalling")
-            return None
-        except Exception:
-            return None
+    for i, file_path in enumerate(to_process):
+        if scan_mgr.cancel_requested:
+            scan_mgr.add_log("🛑 扫描任务已手动中止。")
+            break
 
-    try:
-        for i in range(0, len(to_process), batch_size):
-            if scan_mgr.cancel_requested:
-                scan_mgr.add_log("🛑 扫描任务已手动中止。")
-                break
+        # Sequential file processing (0 disk thrashing)
+        row = await loop.run_in_executor(None, _process_single_audio_file, file_path)
+        if row:
+            batch_buffer.append(row)
 
-            batch = to_process[i:i + batch_size]
-            tasks = [asyncio.create_task(_safe_process(f)) for f in batch]
+        processed += 1
 
-            valid_batch = []
-            for coro in asyncio.as_completed(tasks):
-                res = await coro
-                if res:
-                    valid_batch.append(res)
-                processed += 1
-                if processed % 30 == 0 or processed == len(to_process):
-                    scan_mgr.status["current"] = processed
-                    scan_mgr.status["total"] = len(to_process)
-                    scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
-                    scan_mgr.add_log(f"-> 实时扫描进度: {processed}/{len(to_process)} 首 ({scan_mgr.status['percent']}%)")
+        # Commit batch to SQLite and yield control to event loop
+        if len(batch_buffer) >= batch_size or processed == len(to_process):
+            await loop.run_in_executor(None, library_db.upsert_tracks_batch, batch_buffer)
+            batch_buffer = []
 
-            if valid_batch:
-                await loop.run_in_executor(None, library_db.upsert_tracks_batch, valid_batch)
+            scan_mgr.status["current"] = processed
+            scan_mgr.status["total"] = len(to_process)
+            scan_mgr.status["percent"] = round(processed * 100 / len(to_process), 1)
+            scan_mgr.add_log(f"-> 顺序入库进度: {processed}/{len(to_process)} 首 ({scan_mgr.status['percent']}%) - 最新: {os.path.basename(file_path)}")
+            # Short async sleep to allow UI polling to update seamlessly
+            await asyncio.sleep(0.001)
 
-        # Bulk refresh artist and album aggregate stats in one fast query
-        await loop.run_in_executor(None, library_db.refresh_library_aggregates)
-
-    finally:
-        executor.shutdown(wait=False)
+    # Bulk refresh artist and album aggregate stats in one fast query
+    await loop.run_in_executor(None, library_db.refresh_library_aggregates)
 
     scan_mgr.is_running = False
     scan_mgr.status["is_running"] = False
