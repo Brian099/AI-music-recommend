@@ -194,8 +194,8 @@
                 <span>AI 声学向量提取</span>
             </div>
             <div class="nav-item" id="nav-dedupe" onclick="switchTab('dedupe')">
-                <span class="nav-icon">🟢</span>
-                <span>频谱体检与去重</span>
+                <span class="nav-icon">🎵</span>
+                <span>声学指纹与智能去重</span>
             </div>
         </div>
 
@@ -270,7 +270,7 @@
                     <span id="vector-percent-badge" class="badge">就绪</span>
                 </div>
                 <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">
-                    基于 EmbeatMLP 神经网络模型提取 128 维声学 Embedding 向量，同步批量写入 Qdrant 向量数据库，驱动 AI 漫游电台。
+                    基于 EmbeatMLP 神经网络模型提取 128 维声学 Embedding 向量，同步批量写入 Qdrant 向量数据库，驱动 AI 漫游电台与相似歌曲推荐。
                 </p>
                 <div style="display:flex; gap:12px; margin-bottom: 16px;">
                     <button id="btn-start-vector" class="btn" style="background: var(--accent-green); color:#000;" onclick="startVectorExtract()">启动 AI 声学向量提取</button>
@@ -285,33 +285,67 @@
             </div>
         </div>
 
-        <!-- 4. Dedupe & Lossless Inspector View Panel -->
+        <!-- 4. Dedupe & Acoustic Fingerprint View Panel -->
         <div class="view-panel" id="view-dedupe">
-            <div class="panel-card">
+            <!-- Part 1: Chromaprint Acoustic Fingerprint Engine Card -->
+            <div class="panel-card" style="margin-bottom: 20px;">
                 <div class="panel-header">
-                    <div class="panel-title">🟢 频谱体检与智能音频去重</div>
+                    <div class="panel-title">🎵 Chromaprint 声学指纹计算引擎 (Songloft 架构)</div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <span id="fp-avail-badge" class="badge">检测中...</span>
+                        <span id="fp-percent-badge" class="badge">就绪</span>
+                    </div>
                 </div>
                 <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">
-                    基于 STFT 频谱判定假无损 FLAC，并通过 MD5 物理哈希与模糊归一化算法，智能保留高品质音乐、移走重复低画质副本。
+                    通过 FFmpeg Chromaprint Muxer 提取音频前 120 秒高维声学指纹，并采集全片时长进行容差聚簇（Duration Guard），精准识别同一首歌曲的不同转码格式版本（如 FLAC 与 MP3）。
                 </p>
-
-                <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); padding: 14px; border-radius: 12px; margin-bottom: 16px;">
-                    <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">单曲 STFT 频谱体检</div>
-                    <div style="display:flex; gap:8px;">
-                        <input type="text" id="inspect-path" class="input-field" placeholder="输入音频文件绝对路径 (例如 D:\music\test.flac)">
-                        <button class="btn" style="white-space:nowrap;" onclick="inspectLossless()">频谱体检</button>
-                    </div>
-                    <div id="inspect-result" style="margin-top: 8px; font-weight: 600; font-size:13px; color:var(--accent-green);"></div>
-                </div>
-
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-                    <span style="font-weight: 600; font-size: 15px;">重复音频扫描与比对</span>
-                    <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="runDedupeScan()">扫描重复文件</button>
-                </div>
                 
-                <div id="dedupe-results" style="flex:1; min-height: 280px; max-height: 480px; overflow-y: auto; font-size:13px; color:var(--text-muted);">
-                    <div>点击上方“扫描重复文件”获取音频去重分析报告...</div>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin-bottom: 14px;">
+                    <button id="btn-start-fp" class="btn" style="background: #ff7700; color:#fff;" onclick="startFingerprint('missing')">⚡ 计算缺失指纹</button>
+                    <button id="btn-recompute-fp" class="btn" style="background: rgba(255,255,255,0.08);" onclick="startFingerprint('recompute_all')">🔄 全量重新计算</button>
+                    <button id="btn-retry-fp" class="btn" style="background: rgba(255,255,255,0.08); display:none;" onclick="startFingerprint('retry_failed')">⚠️ 重试失败项</button>
+                    <button id="btn-stop-fp" class="btn" style="background: var(--accent-red); display: none;" onclick="stopFingerprint()">🛑 中止计算</button>
+                    
+                    <div style="margin-left: auto; display:flex; gap:8px; font-size:12px;">
+                        <span id="fp-stat-total" class="badge" style="background: rgba(255,255,255,0.08);">曲库总计: -</span>
+                        <span id="fp-stat-computed" class="badge" style="background: rgba(0,255,136,0.15); color:var(--accent-green);">已提取: -</span>
+                        <span id="fp-stat-failed" class="badge" style="background: rgba(255,71,87,0.15); color:var(--accent-red); display:none;">失败: -</span>
+                    </div>
                 </div>
+
+                <div class="progress-container">
+                    <div id="fp-progress-bar" class="progress-bar" style="background: linear-gradient(90deg, #ff7700, #ffaa00);"></div>
+                </div>
+                <div id="fp-log-box" class="log-box" style="height: 100px;">
+                    <div style="color: var(--text-muted);">声学指纹计算控制台就绪...</div>
+                </div>
+            </div>
+
+            <!-- Part 2: Deduplication Scanning & Resolution Card -->
+            <div class="panel-card" style="margin-bottom: 20px;">
+                <div class="panel-header">
+                    <div class="panel-title">🔍 多维度智能音频查重与去重治理</div>
+                    <button class="btn" style="background: var(--primary);" onclick="runDedupeScan()">🔍 开始全盘查重扫描</button>
+                </div>
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">
+                    综合分析<strong>二进制 MD5</strong>、<strong>Chromaprint 声学指纹</strong>与<strong>元数据模糊匹配</strong>，自动进行多指标音质评分（真无损检测、格式级别、码率与大小），智能推荐保留高品质母本。
+                </p>
+                
+                <div id="dedupe-results" style="min-height: 240px; max-height: 520px; overflow-y: auto; font-size:13px; color:var(--text-muted);">
+                    <div>点击上方“开始全盘查重扫描”按钮，获取曲库重复音乐智能分析报告...</div>
+                </div>
+            </div>
+
+            <!-- Part 3: STFT Lossless Inspector -->
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title">🔬 单曲 STFT 频谱体检 (假无损检测)</div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="inspect-path" class="input-field" placeholder="输入音频文件绝对路径 (例如 D:\music\test.flac)">
+                    <button class="btn" style="white-space:nowrap;" onclick="inspectLossless()">频谱体检</button>
+                </div>
+                <div id="inspect-result" style="margin-top: 8px; font-weight: 600; font-size:13px; color:var(--accent-green);"></div>
             </div>
         </div>
 
@@ -423,9 +457,43 @@
                 // Update Vector task
                 updateTaskUI("vector", data.vector, "vector-progress-bar", "vector-percent-badge", "vector-log-box", "btn-start-vector", "btn-stop-vector", "向量信息提取中...", "启动 AI 声学向量提取");
 
+                // Update Fingerprint task & stats
+                if (data.fingerprint) {
+                    const fp = data.fingerprint;
+                    const availBadge = document.getElementById("fp-avail-badge");
+                    if (availBadge) {
+                        availBadge.innerText = fp.is_available ? "Chromaprint 就绪" : "未检测到 ffmpeg";
+                        availBadge.style.background = fp.is_available ? "rgba(0,255,136,0.2)" : "rgba(255,71,87,0.2)";
+                        availBadge.style.color = fp.is_available ? "var(--accent-green)" : "var(--accent-red)";
+                    }
+
+                    if (fp.stats) {
+                        const totalEl = document.getElementById("fp-stat-total");
+                        const compEl = document.getElementById("fp-stat-computed");
+                        const failEl = document.getElementById("fp-stat-failed");
+                        const retryBtn = document.getElementById("btn-retry-fp");
+
+                        if (totalEl) totalEl.innerText = `曲库总计: ${fp.stats.total}`;
+                        if (compEl) compEl.innerText = `已提取: ${fp.stats.computed}`;
+                        if (failEl) {
+                            if (fp.stats.failed > 0) {
+                                failEl.innerText = `失败: ${fp.stats.failed}`;
+                                failEl.style.display = "inline-block";
+                                if (retryBtn) retryBtn.style.display = "inline-block";
+                            } else {
+                                failEl.style.display = "none";
+                                if (retryBtn) retryBtn.style.display = "none";
+                            }
+                        }
+                    }
+
+                    updateTaskUI("fingerprint", fp, "fp-progress-bar", "fp-percent-badge", "fp-log-box", "btn-start-fp", "btn-stop-fp", "指纹提取中...", "⚡ 计算缺失指纹");
+                }
+
                 const isAnyRunning = (data.scan && data.scan.status.is_running) ||
                                      (data.scrape && data.scrape.status.is_running) ||
-                                     (data.vector && data.vector.status.is_running);
+                                     (data.vector && data.vector.status.is_running) ||
+                                     (data.fingerprint && data.fingerprint.status && data.fingerprint.status.is_running);
 
                 if (isAnyRunning) {
                     if (!pollTimer) pollTimer = setInterval(loadAdminStatus, 1500);
@@ -487,7 +555,26 @@
             loadAdminStatus();
         }
 
-        // 4. Quality & Dedupe Actions
+        // 4. Chromaprint Fingerprint Actions (Songloft Port)
+        async function startFingerprint(mode) {
+            const res = await fetch(`/api/fingerprint/start?mode=${encodeURIComponent(mode)}`, {
+                method: "POST", headers: { "X-Admin-Token": adminToken }
+            });
+            const data = await res.json();
+            if (data.status === "error") {
+                alert("启动失败: " + data.message);
+            } else {
+                alert(data.message || "指纹计算任务已启动！");
+            }
+            loadAdminStatus();
+        }
+
+        async function stopFingerprint() {
+            await fetch("/api/fingerprint/stop", { method: "POST", headers: { "X-Admin-Token": adminToken } });
+            loadAdminStatus();
+        }
+
+        // 5. Quality & Dedupe Actions
         async function inspectLossless() {
             const path = document.getElementById("inspect-path").value;
             if (!path) { alert("请输入音频文件路径"); return; }
@@ -500,35 +587,72 @@
 
         async function runDedupeScan() {
             const box = document.getElementById("dedupe-results");
-            box.innerHTML = `<div style="color: var(--text-muted);">正在分析数据库中的 MD5 哈希与元数据时长...</div>`;
+            box.innerHTML = `<div style="color: var(--primary); padding:10px 0;">⏳ 正在执行多维度查重比对 (MD5 哈希 + Chromaprint 声学指纹 + 元数据)...</div>`;
             try {
                 const res = await fetch("/api/dedupe/scan", { headers: { "X-Admin-Token": adminToken } });
                 const data = await res.json();
                 if (!data || data.length === 0) {
-                    box.innerHTML = `<div style="color: var(--accent-green); margin-top: 6px;">✓ 恭喜！未在音频库中发现重复音乐。</div>`;
+                    box.innerHTML = `<div style="color: var(--accent-green); margin-top: 6px; padding:12px; background:rgba(0,255,136,0.06); border-radius:8px;">✓ 恭喜！未在音频库中发现重复音乐。</div>`;
                     return;
                 }
 
-                let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <span style="color: var(--accent-red); font-weight:600;">检测到 ${data.length} 组重复音频</span>
-                    <button class="btn" style="background: var(--accent-red); font-size:12px; padding:6px 12px;" onclick="resolveAllDuplicates()">🧹 一键全自动清理重复项</button>
+                let totalDuplicates = 0;
+                data.forEach(c => { totalDuplicates += (c.tracks.length - 1); });
+
+                let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; background:rgba(255,71,87,0.1); border:1px solid rgba(255,71,87,0.3); padding:10px 14px; border-radius:10px;">
+                    <div>
+                        <span style="color: var(--accent-red); font-weight:700; font-size:14px;">⚠️ 检测到 ${data.length} 组重复音频 (共 ${totalDuplicates} 个冗余文件)</span>
+                        <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">智能算法已自动推荐保留最高音质版本，多余版本将安全移入 data/trash 回收站。</div>
+                    </div>
+                    <button class="btn" style="background: var(--accent-red); font-size:12px; padding:8px 14px; white-space:nowrap;" onclick="resolveAllDuplicates()">🧹 一键全自动清理重复项</button>
                 </div>`;
 
                 data.forEach((cluster, idx) => {
-                    html += `<div style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 10px; padding: 12px; margin-bottom: 10px;">
-                        <div style="font-size:13px; font-weight:600; color: var(--primary); margin-bottom:8px;">组 ${idx+1}: ${cluster.match_type}</div>`;
+                    let typeIcon = "🎵";
+                    let badgeColor = "#ff7700";
+                    if (cluster.match_type.includes("MD5")) {
+                        typeIcon = "⚡";
+                        badgeColor = "#00d2ff";
+                    } else if (cluster.match_type.includes("Metadata") || cluster.match_type.includes("Title")) {
+                        typeIcon = "📝";
+                        badgeColor = "#a044ff";
+                    }
+
+                    html += `<div style="background: rgba(0,0,0,0.35); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px; margin-bottom: 14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <div style="font-size:14px; font-weight:600; color: var(--text-main);">
+                                <span style="margin-right:6px;">${typeIcon}</span>组 ${idx+1}: <span style="color:${badgeColor}; font-weight:700;">${cluster.match_type}</span>
+                            </div>
+                            <span class="badge" style="background:rgba(255,255,255,0.08); font-size:11px;">${cluster.tracks.length} 首</span>
+                        </div>`;
+
                     cluster.tracks.forEach(t => {
                         const isKeep = t.recommend_action === "KEEP";
-                        const badgeColor = isKeep ? "var(--accent-green)" : "var(--accent-red)";
-                        const badgeText = isKeep ? "🟢 推荐保留 (高画质)" : "🔴 建议清理 (重复版)";
+                        const actionColor = isKeep ? "var(--accent-green)" : "var(--accent-red)";
+                        const actionText = isKeep ? "🟢 推荐保留 (高品质)" : "🔴 建议清理 (重复项)";
                         const mb = (t.file_size / 1048576).toFixed(1);
-                        html += `<div style="display:flex; justify-content:space-between; align-items:center; background: ${isKeep ? 'rgba(0,255,136,0.05)' : 'rgba(255,71,87,0.05)'}; padding: 8px 10px; border-radius: 8px; margin-top: 6px; font-size: 13px;">
-                            <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 75%;">
-                                <span style="color:${badgeColor}; font-weight:600;">${badgeText}</span>
-                                <span style="margin-left:8px; color:var(--text-main);">${t.track_name || '未知歌名'} - ${t.artist_name || '未知歌手'}</span>
-                                <span style="color:var(--text-muted); margin-left:6px;">(${t.format}, ${mb}MB)</span>
+                        const dur = t.duration ? `${Math.floor(t.duration / 60)}:${String(Math.floor(t.duration % 60)).padStart(2, '0')}` : "--:--";
+                        const fmt = (t.format || 'AUDIO').toUpperCase();
+                        const br = t.bitrate ? `${Math.round(t.bitrate/1000)}kbps` : '';
+
+                        html += `<div style="display:flex; justify-content:space-between; align-items:center; background: ${isKeep ? 'rgba(0,255,136,0.06)' : 'rgba(255,71,87,0.04)'}; border:1px solid ${isKeep ? 'rgba(0,255,136,0.25)' : 'rgba(255,71,87,0.15)'}; padding: 10px 12px; border-radius: 8px; margin-top: 8px; font-size: 13px;">
+                            <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 76%;">
+                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                    <span style="color:${actionColor}; font-weight:700; font-size:12px;">${actionText}</span>
+                                    <span style="color:var(--text-main); font-weight:600;">${t.track_name || '未知歌名'}</span>
+                                    <span style="color:var(--text-muted);">- ${t.artist_name || '未知歌手'}</span>
+                                </div>
+                                <div style="font-size:11px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    <span class="badge" style="background:rgba(255,255,255,0.08); padding:2px 6px; font-size:10px; margin-right:4px;">${fmt}</span>
+                                    ${br ? `<span class="badge" style="background:rgba(255,255,255,0.08); padding:2px 6px; font-size:10px; margin-right:4px;">${br}</span>` : ''}
+                                    <span style="margin-right:6px;">⏱️ ${dur}</span>
+                                    <span style="margin-right:6px;">💾 ${mb}MB</span>
+                                    <span style="opacity:0.7;" title="${t.local_path}">${t.local_path}</span>
+                                </div>
                             </div>
-                            ${!isKeep ? `<button class="btn" style="background: var(--accent-red); font-size:11px; padding:4px 10px;" onclick="resolveSingleDuplicate('${encodeURIComponent(t.local_path)}')">移至回收站</button>` : `<span style="color:var(--accent-green); font-size:12px; font-weight:600;">[保留首选]</span>`}
+                            <div>
+                                ${!isKeep ? `<button class="btn" style="background: var(--accent-red); font-size:12px; padding:5px 12px;" onclick="resolveSingleDuplicate('${encodeURIComponent(t.local_path)}')">移至回收站</button>` : `<span style="color:var(--accent-green); font-size:12px; font-weight:700; padding:4px 8px; border:1px solid rgba(0,255,136,0.3); border-radius:6px; background:rgba(0,255,136,0.1);">[保留母本]</span>`}
+                            </div>
                         </div>`;
                     });
                     html += `</div>`;
@@ -536,7 +660,7 @@
                 box.innerHTML = html;
                 window._latestDedupeClusters = data;
             } catch (err) {
-                box.innerHTML = `<div style="color: var(--accent-red);">扫描出错: ${err}</div>`;
+                box.innerHTML = `<div style="color: var(--accent-red); padding:10px;">扫描出错: ${err}</div>`;
             }
         }
 
@@ -553,7 +677,6 @@
 
         async function resolveAllDuplicates() {
             if (!window._latestDedupeClusters || window._latestDedupeClusters.length === 0) return;
-            if (!confirm(`确定一键将所有建议清理的重复音频移入回收站 (data/trash) 吗？`)) return;
 
             let toDelete = [];
             window._latestDedupeClusters.forEach(cluster => {
@@ -564,14 +687,20 @@
                 });
             });
 
-            let count = 0;
-            for (const p of toDelete) {
-                await fetch(`/api/dedupe/resolve?path=${encodeURIComponent(p)}`, {
-                    method: "POST", headers: { "X-Admin-Token": adminToken }
-                });
-                count++;
+            if (toDelete.length === 0) {
+                alert("没有需要清理的重复项。");
+                return;
             }
-            alert(`✓ 已成功清理 ${count} 个重复音频（已安全移入 data/trash 回收站）！`);
+
+            if (!confirm(`确定一键将所有 ${toDelete.length} 首建议清理的重复音频移入回收站 (data/trash) 吗？`)) return;
+
+            const res = await fetch("/api/dedupe/resolve_batch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Admin-Token": adminToken },
+                body: JSON.stringify({ paths: toDelete, safe_trash: true })
+            });
+            const data = await res.json();
+            alert(data.message || `✓ 已成功清理 ${data.resolved_count} 个重复音频！`);
             runDedupeScan();
         }
     </script>

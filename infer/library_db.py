@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 # Written by GD Studio / Antigravity AI
 # Date: 2026-08-07
+# Updated: 2026-08-24 (Integrated Chromaprint Acoustic Fingerprint Engine ported from Songloft)
 #
 # SQLite Database Storage & Indexing Engine for Local Music Library
-# Manages relational schemas for tracks, artists, albums, folders, metadata, and quality badges.
+# Manages relational schemas for tracks, artists, albums, folders, metadata, fingerprints, and quality badges.
 
 import os
 import sqlite3
@@ -26,7 +27,7 @@ class LibraryDatabase:
         return conn
 
     def init_db(self):
-        """Initialize relational database tables and indices."""
+        """Initialize relational database tables, migrations, and indices."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
@@ -45,6 +46,9 @@ class LibraryDatabase:
                 file_size INTEGER DEFAULT 0,
                 mtime REAL DEFAULT 0.0,
                 md5 TEXT,
+                fingerprint TEXT DEFAULT '',
+                fingerprint_duration REAL DEFAULT 0.0,
+                fingerprint_attempted_at REAL DEFAULT 0.0,
                 genre TEXT,
                 year INTEGER,
                 track_number INTEGER,
@@ -58,6 +62,16 @@ class LibraryDatabase:
                 updated_at REAL NOT NULL
             );
             """)
+
+            # Dynamic migration for existing databases without fingerprint columns
+            cursor.execute("PRAGMA table_info(tracks);")
+            columns = {row["name"] for row in cursor.fetchall()}
+            if "fingerprint" not in columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN fingerprint TEXT DEFAULT '';")
+            if "fingerprint_duration" not in columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN fingerprint_duration REAL DEFAULT 0.0;")
+            if "fingerprint_attempted_at" not in columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN fingerprint_attempted_at REAL DEFAULT 0.0;")
 
             # Artists table
             cursor.execute("""
@@ -99,6 +113,7 @@ class LibraryDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_md5 ON tracks(md5);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_fingerprint ON tracks(fingerprint);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(local_path);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_path);")
 
@@ -121,12 +136,14 @@ class LibraryDatabase:
             INSERT INTO tracks (
                 track_id, local_path, track_name, artist_name, album_name,
                 duration, bitrate, sample_rate, format, file_size, mtime, md5,
+                fingerprint, fingerprint_duration, fingerprint_attempted_at,
                 genre, year, track_number, cover_path, lyrics_path,
                 is_true_lossless, cutoff_freq, quality_rating, scraped_at,
                 created_at, updated_at
             ) VALUES (
                 :track_id, :local_path, :track_name, :artist_name, :album_name,
                 :duration, :bitrate, :sample_rate, :format, :file_size, :mtime, :md5,
+                :fingerprint, :fingerprint_duration, :fingerprint_attempted_at,
                 :genre, :year, :track_number, :cover_path, :lyrics_path,
                 :is_true_lossless, :cutoff_freq, :quality_rating, :scraped_at,
                 :created_at, :updated_at
@@ -141,6 +158,9 @@ class LibraryDatabase:
                 file_size = excluded.file_size,
                 mtime = excluded.mtime,
                 md5 = COALESCE(excluded.md5, tracks.md5),
+                fingerprint = CASE WHEN excluded.fingerprint != '' THEN excluded.fingerprint ELSE tracks.fingerprint END,
+                fingerprint_duration = CASE WHEN excluded.fingerprint_duration > 0 THEN excluded.fingerprint_duration ELSE tracks.fingerprint_duration END,
+                fingerprint_attempted_at = CASE WHEN excluded.fingerprint_attempted_at > 0 THEN excluded.fingerprint_attempted_at ELSE tracks.fingerprint_attempted_at END,
                 genre = COALESCE(excluded.genre, tracks.genre),
                 year = COALESCE(excluded.year, tracks.year),
                 track_number = COALESCE(excluded.track_number, tracks.track_number),
@@ -164,6 +184,9 @@ class LibraryDatabase:
                 "file_size": track.get("file_size", 0),
                 "mtime": track.get("mtime", 0.0),
                 "md5": track.get("md5"),
+                "fingerprint": track.get("fingerprint", ""),
+                "fingerprint_duration": track.get("fingerprint_duration", 0.0),
+                "fingerprint_attempted_at": track.get("fingerprint_attempted_at", 0.0),
                 "genre": track.get("genre"),
                 "year": track.get("year"),
                 "track_number": track.get("track_number"),
@@ -218,7 +241,7 @@ class LibraryDatabase:
             cursor.execute("SELECT local_path, mtime FROM tracks;")
             return {row["local_path"]: row["mtime"] for row in cursor.fetchall()}
 
-    def get_all_tracks(self, limit: int = 1000, offset: int = 0) -> List[Dict[str, Any]]:
+    def get_all_tracks(self, limit: int = 50000, offset: int = 0) -> List[Dict[str, Any]]:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM tracks ORDER BY track_name ASC LIMIT ? OFFSET ?;", (limit, offset))
@@ -260,6 +283,118 @@ class LibraryDatabase:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM tracks WHERE local_path = ?;", (local_path,))
             conn.commit()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Fingerprint Management Methods (Ported from Songloft song_repository.go)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def update_fingerprint(self, local_path: str, fingerprint: str, duration: float, attempted_at: float):
+        """Saves extracted chromaprint fingerprint and full duration."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE tracks SET
+                fingerprint = ?,
+                fingerprint_duration = ?,
+                fingerprint_attempted_at = ?,
+                duration = CASE WHEN duration <= 0 OR duration = 180.0 THEN ? ELSE duration END,
+                updated_at = ?
+            WHERE local_path = ?;
+            """, (fingerprint, duration, attempted_at, duration, time.time(), local_path))
+            conn.commit()
+
+    def mark_fingerprint_attempted(self, local_path: str, attempted_at: float):
+        """Marks that fingerprint extraction was attempted and failed to avoid infinite loop retry."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE tracks SET
+                fingerprint_attempted_at = ?,
+                updated_at = ?
+            WHERE local_path = ?;
+            """, (attempted_at, time.time(), local_path))
+            conn.commit()
+
+    def clear_all_fingerprints(self):
+        """Clears all fingerprints to force full recomputation."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE tracks SET
+                fingerprint = '',
+                fingerprint_duration = 0.0,
+                fingerprint_attempted_at = 0.0,
+                updated_at = ?;
+            """, (time.time(),))
+            conn.commit()
+
+    def reset_failed_fingerprints(self):
+        """Resets failed attempts so they can be retried without wiping valid fingerprints."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE tracks SET
+                fingerprint_attempted_at = 0.0,
+                updated_at = ?
+            WHERE (fingerprint = '' OR fingerprint IS NULL) AND fingerprint_attempted_at > 0;
+            """, (time.time(),))
+            conn.commit()
+
+    def get_fingerprint_stats(self) -> Dict[str, int]:
+        """Returns total, computed, and failed count of fingerprints."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN fingerprint != '' AND fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0) AS computed,
+                COALESCE(SUM(CASE WHEN (fingerprint = '' OR fingerprint IS NULL) AND fingerprint_attempted_at > 0 THEN 1 ELSE 0 END), 0) AS failed
+            FROM tracks;
+            """)
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "total": int(row["total"]),
+                    "computed": int(row["computed"]),
+                    "failed": int(row["failed"])
+                }
+            return {"total": 0, "computed": 0, "failed": 0}
+
+    def list_without_fingerprint(self) -> List[Dict[str, Any]]:
+        """Lists all tracks that have no fingerprint and have not been marked as failed."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT track_id, local_path, track_name, artist_name, duration, format
+            FROM tracks
+            WHERE (fingerprint = '' OR fingerprint IS NULL)
+              AND (fingerprint_attempted_at = 0 OR fingerprint_attempted_at IS NULL);
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def list_duplicate_fingerprints(self) -> List[Dict[str, Any]]:
+        """Finds all fingerprints that appear more than once."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT fingerprint, COUNT(*) AS cnt
+            FROM tracks
+            WHERE fingerprint != '' AND fingerprint IS NOT NULL
+            GROUP BY fingerprint
+            HAVING COUNT(*) > 1;
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_tracks_by_fingerprint(self, fingerprint: str) -> List[Dict[str, Any]]:
+        """Gets all tracks sharing the given fingerprint."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM tracks
+            WHERE fingerprint = ?
+            ORDER BY duration DESC, bitrate DESC, file_size DESC;
+            """, (fingerprint,))
+            return [dict(row) for row in cursor.fetchall()]
 
 
 library_db = LibraryDatabase()

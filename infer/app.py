@@ -44,7 +44,8 @@ from infer.model_infer import load_model, build_features
 from infer.auth import verify_password, create_admin_token, require_admin_auth
 from infer.library_db import library_db
 from infer.quality_analyzer import analyze_audio_quality
-from infer.dedupe import find_duplicates, resolve_duplicate, calculate_file_md5
+from infer.dedupe import find_duplicates, resolve_duplicate, resolve_batch_duplicates, calculate_file_md5
+from infer.fingerprint import fingerprint_service, is_chromaprint_available
 from infer.scraper import fetch_online_metadata, fetch_lyrics_lddc, apply_scrape_to_file
 try:
     from qdrant_client import QdrantClient
@@ -498,6 +499,8 @@ def get_cpu_info():
 
 @app.get("/api/admin/status", dependencies=[Depends(require_admin_auth)])
 async def get_admin_status():
+    fp_stats = library_db.get_fingerprint_stats()
+    fp_progress = fingerprint_service.get_progress()
     return {
         "scan": {
             "status": scan_mgr.status,
@@ -510,6 +513,12 @@ async def get_admin_status():
         "vector": {
             "status": vector_task_mgr.status,
             "logs": vector_task_mgr.logs,
+        },
+        "fingerprint": {
+            "status": fp_progress,
+            "stats": fp_stats,
+            "logs": fingerprint_service.logs,
+            "is_available": is_chromaprint_available()
         },
         "status": scan_mgr.status,  # Fallback backward compatibility
         "logs": scan_mgr.logs,      # Fallback backward compatibility
@@ -914,11 +923,47 @@ async def _run_batch_vector_extraction(workers: int):
     vector_task_mgr.add_log(f"✓ 声学向量提取与 Qdrant 索引任务完成！已处理 {processed}/{len(to_process)} 首曲目。")
 
 
-# ── Quality, Dedupe & Scrape Protected APIs ───────────────────────────────────
+# ── Quality, Dedupe & Fingerprint Protected APIs ──────────────────────────────
+
+class DedupeBatchRequest(BaseModel):
+    paths: List[str]
+    safe_trash: bool = True
+
 
 @app.post("/api/quality/analyze", dependencies=[Depends(require_admin_auth)])
 async def analyze_quality_api(path: str = Query(...)):
     return analyze_audio_quality(path)
+
+# ── Fingerprint Management APIs (Ported from Songloft) ─────────────────────────
+
+@app.get("/api/fingerprint/status", dependencies=[Depends(require_admin_auth)])
+async def fingerprint_status_api():
+    stats = library_db.get_fingerprint_stats()
+    available = is_chromaprint_available()
+    progress = fingerprint_service.get_progress()
+    return {
+        "is_available": available,
+        "stats": stats,
+        "progress": progress
+    }
+
+@app.get("/api/fingerprint/progress", dependencies=[Depends(require_admin_auth)])
+async def fingerprint_progress_api():
+    return {
+        "progress": fingerprint_service.get_progress(),
+        "logs": fingerprint_service.logs
+    }
+
+@app.post("/api/fingerprint/start", dependencies=[Depends(require_admin_auth)])
+async def fingerprint_start_api(mode: str = Query("missing", description="missing, recompute_all, retry_failed")):
+    return await fingerprint_service.start(mode=mode)
+
+@app.post("/api/fingerprint/stop", dependencies=[Depends(require_admin_auth)])
+async def fingerprint_stop_api():
+    fingerprint_service.cancel()
+    return {"status": "ok", "message": "指纹计算中止请求已发送"}
+
+# ── Deduplication APIs ────────────────────────────────────────────────────────
 
 @app.get("/api/dedupe/scan", dependencies=[Depends(require_admin_auth)])
 async def dedupe_scan():
@@ -927,6 +972,10 @@ async def dedupe_scan():
 @app.post("/api/dedupe/resolve", dependencies=[Depends(require_admin_auth)])
 async def dedupe_resolve(path: str = Query(...)):
     return resolve_duplicate(path)
+
+@app.post("/api/dedupe/resolve_batch", dependencies=[Depends(require_admin_auth)])
+async def dedupe_resolve_batch_api(req: DedupeBatchRequest):
+    return resolve_batch_duplicates(req.paths, safe_trash=req.safe_trash)
 
 @app.post("/api/scrape/track", dependencies=[Depends(require_admin_auth)])
 async def scrape_single_track(path: str = Query(...), title: Optional[str] = None, artist: Optional[str] = None):

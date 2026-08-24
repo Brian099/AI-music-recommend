@@ -1,17 +1,25 @@
 # -*- coding: utf-8 -*-
 # Written by GD Studio / Antigravity AI
 # Date: 2026-08-07
+# Updated: 2026-08-24 (Integrated Chromaprint Acoustic Fingerprint Engine ported from Songloft)
 #
 # Smart Audio Deduplication Engine
-# Detects binary exact duplicates (MD5), acoustic similarity duplicates, and metadata fuzzy duplicates.
-# Integrates True Lossless Quality Score to recommend keeping the highest quality audio file.
+# Multi-tier duplicate detection:
+#   Tier 1: Exact Binary MD5 Match
+#   Tier 2: Chromaprint Acoustic Fingerprint + Duration Guard Clustering (Ported from Songloft)
+#   Tier 3: Metadata & Normalized Title Matching
+# Quality scoring engine recommends keeping the highest quality audio (True Lossless, Bitrate, Format).
 
 import os
-import hashlib
+import re
+import uuid
 import shutil
+import hashlib
 import time
 from typing import List, Dict, Any, Optional
+
 from infer.library_db import library_db
+from infer.fingerprint import cluster_by_fingerprint_duration
 
 
 def calculate_file_md5(file_path: str, chunk_size: int = 1048576) -> Optional[str]:
@@ -29,48 +37,65 @@ def calculate_file_md5(file_path: str, chunk_size: int = 1048576) -> Optional[st
         return None
 
 
-import re
-
-
 def find_duplicates() -> List[Dict[str, Any]]:
     """
-    Scans library_db for duplicate groups across MD5, metadata, and fuzzy title matching.
+    Scans library_db for duplicate groups across:
+    1. Exact MD5 binary hash
+    2. Chromaprint acoustic fingerprints with Duration Guard clustering (Songloft)
+    3. Metadata & fuzzy title matching
     Returns a structured list of duplicate clusters with Smart Keep recommendations.
     """
     tracks = library_db.get_all_tracks(limit=50000, offset=0)
     if not tracks:
         return []
 
-    # Group 1: Exact MD5 Hash Duplicates
+    duplicate_clusters: List[Dict[str, Any]] = []
+    processed_paths = set()
+
+    # ── Tier 1: Exact MD5 Hash Duplicates ─────────────────────────────────────
     md5_groups: Dict[str, List[Dict[str, Any]]] = {}
     for track in tracks:
         md5 = track.get("md5")
         if md5:
             md5_groups.setdefault(md5, []).append(track)
 
-    duplicate_clusters = []
-    processed_paths = set()
-
     for md5, group in md5_groups.items():
         if len(group) > 1:
-            cluster = _build_duplicate_cluster(group, match_type="Exact MD5 Duplicate (二进制强一致重复)")
+            cluster = _build_duplicate_cluster(group, match_type="Exact MD5 Match (二进制强一致重复)")
             duplicate_clusters.append(cluster)
             for t in group:
                 processed_paths.add(t["local_path"])
 
-    # Group 2: Fuzzy Title & Artist Matching (Handles Unknown Artist & Title Only Matches)
+    # ── Tier 2: Chromaprint Acoustic Fingerprint Match + Duration Guard ───────
+    fp_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for track in tracks:
+        if track["local_path"] in processed_paths:
+            continue
+        fp = track.get("fingerprint")
+        if fp and fp.strip():
+            fp_groups.setdefault(fp.strip(), []).append(track)
+
+    for fp, group in fp_groups.items():
+        if len(group) > 1:
+            # Cluster by duration guard (tolerance 30s, chaining) ported from Songloft
+            clusters = cluster_by_fingerprint_duration(group, tolerance=30.0)
+            for cl in clusters:
+                if len(cl) > 1:
+                    cluster = _build_duplicate_cluster(cl, match_type="Chromaprint Acoustic Match (声学指纹跨格式重复)")
+                    duplicate_clusters.append(cluster)
+                    for t in cl:
+                        processed_paths.add(t["local_path"])
+
+    # ── Tier 3: Metadata & Normalized Title Matching ──────────────────────────
     title_groups: Dict[str, List[Dict[str, Any]]] = {}
     for track in tracks:
         if track["local_path"] in processed_paths:
             continue
 
         raw_name = track.get("track_name") or os.path.splitext(os.path.basename(track["local_path"]))[0]
-        # Clean leading track numbers like 01. or [02]-
-        clean_title = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", raw_name).strip().lower()
-        # Clean version suffixes in brackets e.g. (现场版), （古典版）
-        clean_title = re.sub(r"[\(\（\（].*?[\)\）\）]", "", clean_title).strip()
-
+        clean_title = _normalize_title(raw_name)
         artist = (track.get("artist_name") or "").strip().lower()
+
         if artist in ["unknown artist", "unknown", ""]:
             key = f"title::{clean_title}"
         else:
@@ -78,23 +103,25 @@ def find_duplicates() -> List[Dict[str, Any]]:
 
         title_groups.setdefault(key, []).append(track)
 
-    # Group 2a: Strict Artist + Clean Title Matches
     for key, group in list(title_groups.items()):
         if len(group) > 1:
-            cluster = _build_duplicate_cluster(group, match_type="Metadata Match Duplicate (同歌手同歌名重复)")
-            duplicate_clusters.append(cluster)
-            for t in group:
-                processed_paths.add(t["local_path"])
+            # Cluster by duration guard to avoid grouping different live/radio tracks
+            clusters = cluster_by_fingerprint_duration(group, tolerance=40.0)
+            for cl in clusters:
+                if len(cl) > 1:
+                    cluster = _build_duplicate_cluster(cl, match_type="Metadata Match (歌手歌名元数据重复)")
+                    duplicate_clusters.append(cluster)
+                    for t in cl:
+                        processed_paths.add(t["local_path"])
 
-    # Group 3: Generic Title Fallback (Only matches if artist is unknown or artists overlap; respects distinct cover versions)
+    # ── Tier 3b: Generic Title Cross-Format Fallback ──────────────────────────
     generic_title_groups: Dict[str, List[Dict[str, Any]]] = {}
     for track in tracks:
         if track["local_path"] in processed_paths:
             continue
         raw_name = track.get("track_name") or os.path.splitext(os.path.basename(track["local_path"]))[0]
-        clean_title = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", raw_name).strip().lower()
-        clean_title = re.sub(r"[\(\（\（].*?[\)\）\）]", "", clean_title).strip()
-        if len(clean_title) >= 2:  # Avoid single character collision
+        clean_title = _normalize_title(raw_name)
+        if len(clean_title) >= 2:  # Avoid 1-char collision
             generic_title_groups.setdefault(clean_title, []).append(track)
 
     for clean_title, group in generic_title_groups.items():
@@ -108,31 +135,64 @@ def find_duplicates() -> List[Dict[str, Any]]:
                 else:
                     known_artists.add(art)
 
-            # Distinct known cover versions (e.g. 潘安邦 vs 张明敏) should NOT be flagged as duplicates to delete
+            # Different known cover singers should NOT be flagged as duplicate to delete
             if not has_unknown and len(known_artists) > 1:
                 continue
 
-            cluster = _build_duplicate_cluster(group, match_type="Fuzzy Title Duplicate (歌名一致跨格式重复)")
-            duplicate_clusters.append(cluster)
+            clusters = cluster_by_fingerprint_duration(group, tolerance=40.0)
+            for cl in clusters:
+                if len(cl) > 1:
+                    cluster = _build_duplicate_cluster(cl, match_type="Fuzzy Title Match (歌名一致跨格式重复)")
+                    duplicate_clusters.append(cluster)
+                    for t in cl:
+                        processed_paths.add(t["local_path"])
 
     return duplicate_clusters
 
 
+def _normalize_title(raw_name: str) -> str:
+    """Cleans track numbers and version suffixes for fuzzy comparison."""
+    # Clean leading track numbers like 01. or [02]-
+    clean = re.sub(r"^(?:\d{1,3}|\[?\d{1,3}\]?)[\s.\-_·]*(?=[^\s\d.])", "", raw_name).strip().lower()
+    # Clean version suffixes in brackets e.g. (现场版), （古典版）
+    clean = re.sub(r"[\(\（\（].*?[\)\）\）]", "", clean).strip()
+    return clean
+
+
 def _build_duplicate_cluster(tracks: List[Dict[str, Any]], match_type: str) -> Dict[str, Any]:
-    """Sort tracks in cluster by quality score and assign 'keep' recommendation."""
+    """Sort tracks in cluster by quality score and assign 'KEEP' / 'DELETE' recommendation."""
     def quality_score(t: Dict[str, Any]) -> int:
         score = 0
-        fmt = (t.get("format") or "").lower()
+        fmt = (t.get("format") or os.path.splitext(t.get("local_path", ""))[1].lstrip(".")).lower()
         is_lossless = t.get("is_true_lossless")
         bitrate = t.get("bitrate") or 0
+        sample_rate = t.get("sample_rate") or 0
+        file_size = t.get("file_size") or 0
 
+        # Lossless container / verification
         if is_lossless == 1:
-            score += 10000
-        elif fmt in ["flac", "wav", "alac"]:
-            score += 5000
+            score += 15000
+        elif fmt in ["flac", "wav", "alac", "ape"]:
+            score += 8000
+        elif fmt in ["m4a", "aac"]:
+            score += 3000
+        elif fmt in ["mp3", "ogg"]:
+            score += 1000
 
-        score += bitrate // 1000
-        score += int(t.get("file_size", 0) / 1048576)
+        # Bitrate points
+        if bitrate > 0:
+            score += bitrate // 1000
+        elif fmt in ["flac", "wav", "alac", "ape"]:
+            score += 900  # Default lossless estimate
+
+        # Sample rate
+        if sample_rate >= 96000:
+            score += 1000
+        elif sample_rate >= 48000:
+            score += 500
+
+        # Size points (1 point per MB)
+        score += int(file_size / 1048576)
         return score
 
     sorted_tracks = sorted(tracks, key=quality_score, reverse=True)
@@ -150,21 +210,69 @@ def _build_duplicate_cluster(tracks: List[Dict[str, Any]], match_type: str) -> D
 
 
 def resolve_duplicate(delete_path: str, safe_trash: bool = True) -> Dict[str, Any]:
-    """Delete a duplicate audio file or move it safely to data/trash."""
+    """
+    Safely delete duplicate audio file or move it to data/trash.
+    Also removes the record from library_db and Qdrant.
+    """
     if not os.path.exists(delete_path):
         library_db.delete_track(delete_path)
-        return {"status": "ok", "message": f"Track removed from index: {delete_path}"}
+        _delete_qdrant_point(delete_path)
+        return {"status": "ok", "message": f"曲目已从索引库中移除: {os.path.basename(delete_path)}"}
 
     try:
         if safe_trash:
             trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "trash")
             os.makedirs(trash_dir, exist_ok=True)
-            dest_path = os.path.join(trash_dir, os.path.basename(delete_path))
+            # Avoid filename collisions by prepending timestamp
+            base_name = os.path.basename(delete_path)
+            ts = int(time.time())
+            dest_name = f"{ts}_{base_name}"
+            dest_path = os.path.join(trash_dir, dest_name)
             shutil.move(delete_path, dest_path)
         else:
             os.remove(delete_path)
 
         library_db.delete_track(delete_path)
-        return {"status": "ok", "message": f"Successfully removed duplicate: {os.path.basename(delete_path)}"}
+        _delete_qdrant_point(delete_path)
+        return {"status": "ok", "message": f"已成功移除重复音频: {os.path.basename(delete_path)} (安全移入 data/trash)"}
     except Exception as e:
-        return {"status": "error", "message": f"Failed to remove duplicate: {str(e)}"}
+        return {"status": "error", "message": f"处理重复音频失败: {str(e)}"}
+
+
+def resolve_batch_duplicates(delete_paths: List[str], safe_trash: bool = True) -> Dict[str, Any]:
+    """Batch resolves multiple duplicate audio paths."""
+    success_count = 0
+    errors = []
+
+    for path in delete_paths:
+        res = resolve_duplicate(path, safe_trash=safe_trash)
+        if res.get("status") == "ok":
+            success_count += 1
+        else:
+            errors.append(f"{os.path.basename(path)}: {res.get('message')}")
+
+    return {
+        "status": "ok" if not errors else "partial",
+        "resolved_count": success_count,
+        "total": len(delete_paths),
+        "errors": errors,
+        "message": f"成功清理 {success_count}/{len(delete_paths)} 首重复音频。"
+    }
+
+
+def _delete_qdrant_point(file_path: str):
+    """Clean up vector point from Qdrant if collection exists."""
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.http import models as qdrant_models
+        from infer.app import QDRANT_URL, COLLECTION_NAME
+        client = QdrantClient(url=QDRANT_URL, timeout=2.0)
+        track_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, file_path))
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, track_id))
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=qdrant_models.PointIdsList(points=[point_id])
+        )
+        client.close()
+    except Exception:
+        pass
