@@ -372,18 +372,42 @@ class LibraryDatabase:
             """)
             return [dict(row) for row in cursor.fetchall()]
 
-    def list_duplicate_fingerprints(self) -> List[Dict[str, Any]]:
-        """Finds all fingerprints that appear more than once."""
+    def list_duplicate_md5s(self) -> List[str]:
+        """Finds all MD5 hashes that appear more than once via B-Tree index."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-            SELECT fingerprint, COUNT(*) AS cnt
+            SELECT md5
+            FROM tracks
+            WHERE md5 != '' AND md5 IS NOT NULL
+            GROUP BY md5
+            HAVING COUNT(*) > 1;
+            """)
+            return [row["md5"] for row in cursor.fetchall()]
+
+    def get_tracks_by_md5(self, md5: str) -> List[Dict[str, Any]]:
+        """Gets all tracks sharing the given MD5 hash."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM tracks
+            WHERE md5 = ?
+            ORDER BY duration DESC, bitrate DESC, file_size DESC;
+            """, (md5,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def list_duplicate_fingerprints(self) -> List[str]:
+        """Finds all fingerprints that appear more than once via B-Tree index."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT fingerprint
             FROM tracks
             WHERE fingerprint != '' AND fingerprint IS NOT NULL
             GROUP BY fingerprint
             HAVING COUNT(*) > 1;
             """)
-            return [dict(row) for row in cursor.fetchall()]
+            return [row["fingerprint"] for row in cursor.fetchall()]
 
     def get_tracks_by_fingerprint(self, fingerprint: str) -> List[Dict[str, Any]]:
         """Gets all tracks sharing the given fingerprint."""
@@ -395,6 +419,40 @@ class LibraryDatabase:
             ORDER BY duration DESC, bitrate DESC, file_size DESC;
             """, (fingerprint,))
             return [dict(row) for row in cursor.fetchall()]
+
+    def list_duplicate_metadata_keys(self) -> List[Tuple[str, str]]:
+        """Finds artist_name and track_name pairs that appear more than once."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT LOWER(TRIM(artist_name)) AS art, LOWER(TRIM(track_name)) AS tit
+            FROM tracks
+            WHERE artist_name != '' AND artist_name != 'Unknown Artist' AND track_name != ''
+            GROUP BY LOWER(TRIM(artist_name)), LOWER(TRIM(track_name))
+            HAVING COUNT(*) > 1;
+            """)
+            return [(row["art"], row["tit"]) for row in cursor.fetchall()]
+
+    def get_tracks_by_artist_and_title(self, artist_name: str, track_name: str) -> List[Dict[str, Any]]:
+        """Gets tracks matching the given artist and title (case-insensitive)."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM tracks
+            WHERE LOWER(TRIM(artist_name)) = LOWER(TRIM(?))
+              AND LOWER(TRIM(track_name)) = LOWER(TRIM(?))
+            ORDER BY duration DESC, bitrate DESC, file_size DESC;
+            """, (artist_name, track_name))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def delete_tracks_batch(self, local_paths: List[str]):
+        """Deletes multiple tracks in a single batch transaction."""
+        if not local_paths:
+            return
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany("DELETE FROM tracks WHERE local_path = ?;", [(p,) for p in local_paths])
+            conn.commit()
 
 
 library_db = LibraryDatabase()

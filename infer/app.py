@@ -967,15 +967,15 @@ async def fingerprint_stop_api():
 
 @app.get("/api/dedupe/scan", dependencies=[Depends(require_admin_auth)])
 async def dedupe_scan():
-    return find_duplicates()
+    return await asyncio.to_thread(find_duplicates)
 
 @app.post("/api/dedupe/resolve", dependencies=[Depends(require_admin_auth)])
 async def dedupe_resolve(path: str = Query(...)):
-    return resolve_duplicate(path)
+    return await asyncio.to_thread(resolve_duplicate, path)
 
 @app.post("/api/dedupe/resolve_batch", dependencies=[Depends(require_admin_auth)])
 async def dedupe_resolve_batch_api(req: DedupeBatchRequest):
-    return resolve_batch_duplicates(req.paths, safe_trash=req.safe_trash)
+    return await asyncio.to_thread(resolve_batch_duplicates, req.paths, safe_trash=req.safe_trash)
 
 @app.post("/api/scrape/track", dependencies=[Depends(require_admin_auth)])
 async def scrape_single_track(path: str = Query(...), title: Optional[str] = None, artist: Optional[str] = None):

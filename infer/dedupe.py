@@ -39,46 +39,32 @@ def calculate_file_md5(file_path: str, chunk_size: int = 1048576) -> Optional[st
 
 def find_duplicates() -> List[Dict[str, Any]]:
     """
-    Scans library_db for duplicate groups across:
-    1. Exact MD5 binary hash
-    2. Chromaprint acoustic fingerprints with Duration Guard clustering (Songloft)
-    3. Metadata & fuzzy title matching
-    Returns a structured list of duplicate clusters with Smart Keep recommendations.
+    Scans library_db for duplicate groups using B-Tree index pushdown:
+    1. Exact MD5 binary hash duplicates (O(1) index lookup)
+    2. Chromaprint acoustic fingerprints with Duration Guard clustering (O(1) index lookup)
+    3. Metadata (Artist + Title) exact/normalized duplicates with Duration Guard
+    Returns a structured list of duplicate clusters with Smart Keep recommendations in milliseconds.
     """
-    tracks = library_db.get_all_tracks(limit=50000, offset=0)
-    if not tracks:
-        return []
-
     duplicate_clusters: List[Dict[str, Any]] = []
     processed_paths = set()
 
-    # ── Tier 1: Exact MD5 Hash Duplicates ─────────────────────────────────────
-    md5_groups: Dict[str, List[Dict[str, Any]]] = {}
-    for track in tracks:
-        md5 = track.get("md5")
-        if md5:
-            md5_groups.setdefault(md5, []).append(track)
-
-    for md5, group in md5_groups.items():
+    # ── Tier 1: Exact MD5 Hash Duplicates via Index ───────────────────────────
+    dup_md5s = library_db.list_duplicate_md5s()
+    for md5 in dup_md5s:
+        group = library_db.get_tracks_by_md5(md5)
         if len(group) > 1:
             cluster = _build_duplicate_cluster(group, match_type="Exact MD5 Match (二进制强一致重复)")
             duplicate_clusters.append(cluster)
             for t in group:
                 processed_paths.add(t["local_path"])
 
-    # ── Tier 2: Chromaprint Acoustic Fingerprint Match + Duration Guard ───────
-    fp_groups: Dict[str, List[Dict[str, Any]]] = {}
-    for track in tracks:
-        if track["local_path"] in processed_paths:
-            continue
-        fp = track.get("fingerprint")
-        if fp and fp.strip():
-            fp_groups.setdefault(fp.strip(), []).append(track)
-
-    for fp, group in fp_groups.items():
-        if len(group) > 1:
-            # Cluster by duration guard (tolerance 30s, chaining) ported from Songloft
-            clusters = cluster_by_fingerprint_duration(group, tolerance=30.0)
+    # ── Tier 2: Chromaprint Acoustic Fingerprints via Index + Duration Guard ──
+    dup_fps = library_db.list_duplicate_fingerprints()
+    for fp in dup_fps:
+        tracks = library_db.get_tracks_by_fingerprint(fp)
+        unprocessed = [t for t in tracks if t["local_path"] not in processed_paths]
+        if len(unprocessed) > 1:
+            clusters = cluster_by_fingerprint_duration(unprocessed, tolerance=30.0)
             for cl in clusters:
                 if len(cl) > 1:
                     cluster = _build_duplicate_cluster(cl, match_type="Chromaprint Acoustic Match (声学指纹跨格式重复)")
@@ -86,27 +72,13 @@ def find_duplicates() -> List[Dict[str, Any]]:
                     for t in cl:
                         processed_paths.add(t["local_path"])
 
-    # ── Tier 3: Metadata & Normalized Title Matching ──────────────────────────
-    title_groups: Dict[str, List[Dict[str, Any]]] = {}
-    for track in tracks:
-        if track["local_path"] in processed_paths:
-            continue
-
-        raw_name = track.get("track_name") or os.path.splitext(os.path.basename(track["local_path"]))[0]
-        clean_title = _normalize_title(raw_name)
-        artist = (track.get("artist_name") or "").strip().lower()
-
-        if artist in ["unknown artist", "unknown", ""]:
-            key = f"title::{clean_title}"
-        else:
-            key = f"{artist}::{clean_title}"
-
-        title_groups.setdefault(key, []).append(track)
-
-    for key, group in list(title_groups.items()):
-        if len(group) > 1:
-            # Cluster by duration guard to avoid grouping different live/radio tracks
-            clusters = cluster_by_fingerprint_duration(group, tolerance=40.0)
+    # ── Tier 3: Metadata Exact Keys via Index + Duration Guard ────────────────
+    dup_meta_keys = library_db.list_duplicate_metadata_keys()
+    for art, tit in dup_meta_keys:
+        tracks = library_db.get_tracks_by_artist_and_title(art, tit)
+        unprocessed = [t for t in tracks if t["local_path"] not in processed_paths]
+        if len(unprocessed) > 1:
+            clusters = cluster_by_fingerprint_duration(unprocessed, tolerance=40.0)
             for cl in clusters:
                 if len(cl) > 1:
                     cluster = _build_duplicate_cluster(cl, match_type="Metadata Match (歌手歌名元数据重复)")
@@ -114,38 +86,7 @@ def find_duplicates() -> List[Dict[str, Any]]:
                     for t in cl:
                         processed_paths.add(t["local_path"])
 
-    # ── Tier 3b: Generic Title Cross-Format Fallback ──────────────────────────
-    generic_title_groups: Dict[str, List[Dict[str, Any]]] = {}
-    for track in tracks:
-        if track["local_path"] in processed_paths:
-            continue
-        raw_name = track.get("track_name") or os.path.splitext(os.path.basename(track["local_path"]))[0]
-        clean_title = _normalize_title(raw_name)
-        if len(clean_title) >= 2:  # Avoid 1-char collision
-            generic_title_groups.setdefault(clean_title, []).append(track)
-
-    for clean_title, group in generic_title_groups.items():
-        if len(group) > 1:
-            known_artists = set()
-            has_unknown = False
-            for t in group:
-                art = (t.get("artist_name") or "").strip().lower()
-                if not art or art in ["unknown artist", "unknown"]:
-                    has_unknown = True
-                else:
-                    known_artists.add(art)
-
-            # Different known cover singers should NOT be flagged as duplicate to delete
-            if not has_unknown and len(known_artists) > 1:
-                continue
-
-            clusters = cluster_by_fingerprint_duration(group, tolerance=40.0)
-            for cl in clusters:
-                if len(cl) > 1:
-                    cluster = _build_duplicate_cluster(cl, match_type="Fuzzy Title Match (歌名一致跨格式重复)")
-                    duplicate_clusters.append(cluster)
-                    for t in cl:
-                        processed_paths.add(t["local_path"])
+    return duplicate_clusters
 
     return duplicate_clusters
 
