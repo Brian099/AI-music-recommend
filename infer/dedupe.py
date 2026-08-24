@@ -164,70 +164,145 @@ def _build_duplicate_cluster(tracks: List[Dict[str, Any]], match_type: str) -> D
     }
 
 
+def _get_trash_dir(file_path: Optional[str] = None) -> str:
+    """
+    Intelligently determines trash directory on the same filesystem/disk for instant O(1) atomic rename:
+    1. If file is inside MUSIC_DIR (/music/...), uses /music/.trash (same disk volume, instant 0.0001s move).
+    2. Otherwise falls back to data/trash.
+    """
+    music_dir = os.getenv("MUSIC_DIR", "/music")
+    if file_path and os.path.exists(music_dir):
+        try:
+            rel = os.path.relpath(file_path, music_dir)
+            if not rel.startswith(".."):
+                trash_dir = os.path.join(music_dir, ".trash")
+                os.makedirs(trash_dir, exist_ok=True)
+                return trash_dir
+        except Exception:
+            pass
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    trash_dir = os.path.join(project_root, "data", "trash")
+    os.makedirs(trash_dir, exist_ok=True)
+    return trash_dir
+
+
 def resolve_duplicate(delete_path: str, safe_trash: bool = True) -> Dict[str, Any]:
     """
-    Safely delete duplicate audio file or move it to data/trash.
+    Safely delete duplicate audio file or move it to trash directory.
     Also removes the record from library_db and Qdrant vector index.
     """
     if not os.path.exists(delete_path):
         library_db.delete_track(delete_path)
-        _delete_qdrant_point(delete_path)
+        _delete_qdrant_points([delete_path])
         return {"status": "ok", "message": f"曲目已从索引库中移除: {os.path.basename(delete_path)}"}
 
     try:
         if safe_trash:
-            trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "trash")
-            os.makedirs(trash_dir, exist_ok=True)
-            # Avoid filename collisions by prepending timestamp
+            trash_dir = _get_trash_dir(delete_path)
             base_name = os.path.basename(delete_path)
             ts = int(time.time())
             dest_name = f"{ts}_{base_name}"
             dest_path = os.path.join(trash_dir, dest_name)
-            shutil.move(delete_path, dest_path)
+            try:
+                os.replace(delete_path, dest_path)
+            except OSError:
+                shutil.move(delete_path, dest_path)
         else:
             os.remove(delete_path)
 
         library_db.delete_track(delete_path)
-        _delete_qdrant_point(delete_path)
-        return {"status": "ok", "message": f"已成功移除重复音频: {os.path.basename(delete_path)} (安全移入 data/trash)"}
+        _delete_qdrant_points([delete_path])
+        return {"status": "ok", "message": f"已成功移除重复音频: {os.path.basename(delete_path)} (安全移入回收站)"}
     except Exception as e:
         return {"status": "error", "message": f"处理重复音频失败: {str(e)}"}
 
 
 def resolve_batch_duplicates(delete_paths: List[str], safe_trash: bool = True) -> Dict[str, Any]:
-    """Batch resolves multiple duplicate audio paths and cleans up database + Qdrant vectors."""
-    success_count = 0
-    errors = []
+    """
+    Ultra-fast batch duplicate resolver:
+    1. Instant atomic rename for all files on the same disk volume.
+    2. Batch removes all paths from SQLite in a single atomic transaction.
+    3. Single batch point deletion in Qdrant.
+    """
+    if not delete_paths:
+        return {"status": "ok", "resolved_count": 0, "total": 0, "errors": [], "message": "没有需要清理的音频。"}
 
-    for path in delete_paths:
-        res = resolve_duplicate(path, safe_trash=safe_trash)
-        if res.get("status") == "ok":
-            success_count += 1
-        else:
-            errors.append(f"{os.path.basename(path)}: {res.get('message')}")
+    successful_paths = []
+    errors = []
+    ts = int(time.time())
+
+    for idx, path in enumerate(delete_paths):
+        if not os.path.exists(path):
+            successful_paths.append(path)
+            continue
+        try:
+            if safe_trash:
+                trash_dir = _get_trash_dir(path)
+                base_name = os.path.basename(path)
+                dest_name = f"{ts}_{idx}_{base_name}"
+                dest_path = os.path.join(trash_dir, dest_name)
+                try:
+                    os.replace(path, dest_path)
+                except OSError:
+                    shutil.move(path, dest_path)
+            else:
+                os.remove(path)
+            successful_paths.append(path)
+        except Exception as e:
+            errors.append(f"{os.path.basename(path)}: {str(e)}")
+
+    # 1. Batch delete from SQLite in 1 transaction
+    if successful_paths:
+        library_db.delete_tracks_batch(successful_paths)
+
+    # 2. Batch delete from Qdrant in 1 call
+    if successful_paths:
+        _delete_qdrant_points(successful_paths)
 
     return {
         "status": "ok" if not errors else "partial",
-        "resolved_count": success_count,
+        "resolved_count": len(successful_paths),
         "total": len(delete_paths),
         "errors": errors,
-        "message": f"成功清理 {success_count}/{len(delete_paths)} 首重复音频。"
+        "message": f"成功清理 {len(successful_paths)}/{len(delete_paths)} 首重复音频。"
     }
 
 
-def _delete_qdrant_point(file_path: str):
-    """Clean up vector point from Qdrant if collection exists (gracefully ignore if offline)."""
+def resolve_all_duplicates(safe_trash: bool = True) -> Dict[str, Any]:
+    """Scans all duplicates server-side and automatically resolves all recommended DELETE items."""
+    clusters = find_duplicates()
+    to_delete = []
+    for c in clusters:
+        for t in c.get("tracks", []):
+            if t.get("recommend_action") == "DELETE":
+                to_delete.append(t["local_path"])
+
+    if not to_delete:
+        return {"status": "ok", "resolved_count": 0, "total": 0, "errors": [], "message": "曲库中未发现需要清理的重复音频。"}
+
+    return resolve_batch_duplicates(to_delete, safe_trash=safe_trash)
+
+
+def _delete_qdrant_points(file_paths: List[str]):
+    """Clean up vector points from Qdrant in a single batch operation (gracefully non-blocking)."""
+    if not file_paths:
+        return
     try:
         from qdrant_client import QdrantClient
         from qdrant_client.http import models as qdrant_models
         qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
         collection_name = "spotify_tracks"
-        client = QdrantClient(url=qdrant_url, timeout=1.5)
-        track_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, file_path))
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, track_id))
+        client = QdrantClient(url=qdrant_url, timeout=0.8)
+        point_ids = []
+        for fp in file_paths:
+            track_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, fp))
+            point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, track_id))
+            point_ids.append(point_id)
+
         client.delete(
             collection_name=collection_name,
-            points_selector=qdrant_models.PointIdsList(points=[point_id])
+            points_selector=qdrant_models.PointIdsList(points=point_ids)
         )
         client.close()
     except Exception:

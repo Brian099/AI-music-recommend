@@ -754,29 +754,11 @@
         }
 
         async function resolveAllDuplicates() {
-            if (!window._latestDedupeClusters || window._latestDedupeClusters.length === 0) return;
-
-            let toDelete = [];
-            window._latestDedupeClusters.forEach(cluster => {
-                cluster.tracks.forEach(t => {
-                    if (t.recommend_action === "DELETE") {
-                        toDelete.push(t.local_path);
-                    }
-                });
-            });
-
-            if (toDelete.length === 0) {
-                alert("没有需要清理的重复项。");
-                return;
-            }
-
-            if (!confirm(`确定一键将所有 ${toDelete.length} 首建议清理的重复音频移入回收站 (data/trash) 吗？`)) return;
+            if (!confirm("确定一键全自动将所有建议清理的重复音频移入回收站 (data/trash) 吗？")) return;
 
             try {
-                const data = await adminFetch("/api/dedupe/resolve_batch", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ paths: toDelete, safe_trash: true })
+                const data = await adminFetch("/api/dedupe/resolve_all?safe_trash=true", {
+                    method: "POST"
                 });
                 alert(data.message || `✓ 已成功清理 ${data.resolved_count} 个重复音频！`);
                 runDedupeScan();

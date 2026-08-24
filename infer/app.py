@@ -44,7 +44,7 @@ from infer.model_infer import load_model, build_features
 from infer.auth import verify_password, create_admin_token, require_admin_auth
 from infer.library_db import library_db
 from infer.quality_analyzer import analyze_audio_quality
-from infer.dedupe import find_duplicates, resolve_duplicate, resolve_batch_duplicates, calculate_file_md5
+from infer.dedupe import find_duplicates, resolve_duplicate, resolve_batch_duplicates, resolve_all_duplicates, calculate_file_md5
 from infer.fingerprint import fingerprint_service, is_chromaprint_available
 from infer.scraper import fetch_online_metadata, fetch_lyrics_lddc, apply_scrape_to_file
 try:
@@ -602,6 +602,7 @@ async def _run_micro_batch_scan(workers: int):
 
     audio_files = []
     for root, dirs, files in os.walk(MUSIC_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "@eaDir" and d.lower() not in ("trash", "回收站")]
         for file in files:
             if file.lower().endswith((".mp3", ".wav", ".flac", ".m4a", ".ogg")):
                 audio_files.append(os.path.join(root, file))
@@ -1025,6 +1026,10 @@ async def dedupe_resolve(path: str = Query(...)):
 @app.post("/api/dedupe/resolve_batch", dependencies=[Depends(require_admin_auth)])
 async def dedupe_resolve_batch_api(req: DedupeBatchRequest):
     return await asyncio.to_thread(resolve_batch_duplicates, req.paths, safe_trash=req.safe_trash)
+
+@app.post("/api/dedupe/resolve_all", dependencies=[Depends(require_admin_auth)])
+async def dedupe_resolve_all_api(safe_trash: bool = Query(True)):
+    return await asyncio.to_thread(resolve_all_duplicates, safe_trash=safe_trash)
 
 @app.post("/api/scrape/track", dependencies=[Depends(require_admin_auth)])
 async def scrape_single_track(path: str = Query(...), title: Optional[str] = None, artist: Optional[str] = None):
